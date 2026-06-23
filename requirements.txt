@@ -1,0 +1,8 @@
+flask
+flask-sqlalchemy
+flask-login
+yfinance
+requests
+curl_cffi
+gunicorn
+psycopg2-binary

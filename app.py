@@ -118,10 +118,19 @@ def fetch_quote(ticker: str) -> dict:
     try:
         tk = yf.Ticker(symbol)
         preco = None
+        # fast_info.last_price é a forma correta no yfinance >= 0.2
         try:
-            preco = tk.fast_info.get("last_price")
+            preco = tk.fast_info.last_price
         except Exception:
             preco = None
+        # fallback: histórico do dia
+        if not preco:
+            try:
+                hist = tk.history(period="1d")
+                if not hist.empty:
+                    preco = float(hist["Close"].iloc[-1])
+            except Exception:
+                pass
         info = {}
         try:
             info = tk.info or {}
@@ -279,6 +288,16 @@ def api_state(cid):
         "total_tenho": total,
         "pct_ideal_total": sum(a["pct_ideal"] or 0 for a in computed),
     })
+
+
+@app.route("/api/carteira/<int:cid>", methods=["DELETE"])
+@login_required
+def api_delete_carteira(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    db.session.delete(c)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/carteira/<int:cid>/config", methods=["POST"])

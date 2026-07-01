@@ -81,6 +81,29 @@ class Asset(db.Model):
     updated_at = db.Column(db.String(40), default="")
 
 
+class RentAtivo(db.Model):
+    """Ativo/fundo acompanhado no módulo de rentabilidade mensal."""
+    id = db.Column(db.Integer, primary_key=True)
+    carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
+    nome = db.Column(db.String(80), nullable=False)
+    ordem = db.Column(db.Integer, default=0)
+    movs = db.relationship("RentMov", backref="ativo", cascade="all, delete-orphan")
+
+
+class RentMov(db.Model):
+    """Lançamento mensal de um ativo (aporte, resgate, proventos, valor final)."""
+    id = db.Column(db.Integer, primary_key=True)
+    ativo_id = db.Column(db.Integer, db.ForeignKey("rent_ativo.id"), nullable=False)
+    ano = db.Column(db.Integer, nullable=False)
+    mes = db.Column(db.Integer, nullable=False)
+    valor_base = db.Column(db.Float, default=0)   # usado só quando não há mês anterior
+    aporte = db.Column(db.Float, default=0)
+    resgate = db.Column(db.Float, default=0)
+    proventos = db.Column(db.Float, default=0)
+    valor_final = db.Column(db.Float, default=0)
+    __table_args__ = (db.UniqueConstraint("ativo_id", "ano", "mes"),)
+
+
 @login_manager.user_loader
 def load_user(uid):
     return db.session.get(User, int(uid))
@@ -218,6 +241,32 @@ def login():
             return redirect(url_for("index"))
         flash("Nome ou senha incorretos.")
     return render_template("login.html")
+
+
+@app.route("/recuperar", methods=["GET", "POST"])
+def recuperar():
+    """Redefine a senha usando a chave-mestra (env RESET_SECRET)."""
+    reset_secret = os.environ.get("RESET_SECRET", "")
+    if request.method == "POST":
+        nome = (request.form.get("nome") or "").strip()
+        chave = request.form.get("chave") or ""
+        nova = request.form.get("senha") or ""
+        if not reset_secret:
+            flash("Recuperação indisponível: a chave-mestra não foi configurada.")
+        elif chave != reset_secret:
+            flash("Chave-mestra incorreta.")
+        elif not nome or not nova:
+            flash("Preencha o nome de usuário e a nova senha.")
+        else:
+            u = User.query.filter_by(nome=nome).first()
+            if not u:
+                flash("Usuário não encontrado.")
+            else:
+                u.set_senha(nova)
+                db.session.commit()
+                flash("Senha redefinida! Faça login com a nova senha.")
+                return redirect(url_for("login"))
+    return render_template("recuperar.html", habilitado=bool(reset_secret))
 
 
 @app.route("/logout")
@@ -393,6 +442,171 @@ def api_refresh(cid):
         resultados.append({"ticker": a.ticker, **q})
     db.session.commit()
     return jsonify({"ok": True, "resultados": resultados})
+
+
+# --------------------------------------------------------------------------- #
+# Rentabilidade mensal (réplica da planilha "Rent. Geral Acum.")
+# --------------------------------------------------------------------------- #
+
+def rent_compute(cid):
+    """Calcula toda a série histórica de rentabilidade de uma carteira.
+
+    Fórmulas da planilha:
+      rent do ativo  = ValorFinal / (Base + Aporte - Resgate - Proventos) - 1
+      posição encerrada (final=0): rent = Resgate / Base - 1
+      retorno carteira = mesmo cálculo sobre os totais (Patrimônio)
+      acumulado = capitalização composta dos retornos mensais
+    """
+    ativos = RentAtivo.query.filter_by(carteira_id=cid) \
+        .order_by(RentAtivo.ordem, RentAtivo.id).all()
+    movs = {}
+    for a in ativos:
+        for m in a.movs:
+            movs[(a.id, m.ano, m.mes)] = m
+    if not movs:
+        return {"ativos": [{"id": a.id, "nome": a.nome} for a in ativos],
+                "meses": {}, "anos": []}
+
+    periodos = sorted({(m.ano, m.mes) for m in movs.values()})
+    anos = sorted({p[0] for p in periodos})
+    # série completa do primeiro ao último mês lançado
+    a0, m0 = periodos[0]
+    a1, m1 = periodos[-1]
+    serie = []
+    y, mth = a0, m0
+    while (y, mth) <= (a1, m1):
+        serie.append((y, mth))
+        mth += 1
+        if mth > 12:
+            mth = 1; y += 1
+
+    ultimo_final = {a.id: None for a in ativos}   # carrega o saldo entre meses
+    acum = 1.0
+    out_meses = {}
+    for (y, mth) in serie:
+        linhas = []
+        tot = {"base": 0.0, "aporte": 0.0, "resgate": 0.0,
+               "proventos": 0.0, "final": 0.0}
+        tem_dado = False
+        for a in ativos:
+            mv = movs.get((a.id, y, mth))
+            base = ultimo_final[a.id]
+            if base is None:
+                base = (mv.valor_base if mv else 0) or 0
+            aporte = (mv.aporte if mv else 0) or 0
+            resgate = (mv.resgate if mv else 0) or 0
+            prov = (mv.proventos if mv else 0) or 0
+            final = (mv.valor_final if mv else None)
+            if mv:
+                tem_dado = True
+            if final is None:
+                final = base if base else 0
+            rent = None
+            if final == 0 and base:
+                rent = (resgate / base) - 1 if resgate else None
+            else:
+                denom = base + aporte - resgate - prov
+                if denom:
+                    rent = (final / denom) - 1
+            linhas.append({"ativo_id": a.id, "nome": a.nome, "base": base,
+                           "aporte": aporte, "resgate": resgate,
+                           "proventos": prov, "final": final, "rent": rent,
+                           "tem_mov": bool(mv)})
+            tot["base"] += base; tot["aporte"] += aporte
+            tot["resgate"] += resgate; tot["proventos"] += prov
+            tot["final"] += final
+            ultimo_final[a.id] = final
+        # retorno da carteira no mês
+        rent_cart = None
+        denom = tot["base"] + tot["aporte"] - tot["resgate"] - tot["proventos"]
+        if denom:
+            rent_cart = (tot["final"] / denom) - 1
+        if rent_cart is not None and tem_dado:
+            acum *= (1 + rent_cart)
+        for ln in linhas:
+            ln["peso"] = (ln["final"] / tot["final"]) if tot["final"] else 0
+        out_meses[f"{y}-{mth:02d}"] = {
+            "ano": y, "mes": mth, "linhas": linhas,
+            "patrimonio": tot["final"], "aportes": tot["aporte"],
+            "resgates": tot["resgate"], "dividendos": tot["proventos"],
+            "rent": rent_cart if tem_dado else None,
+            "acumulado": (acum - 1) if tem_dado else None,
+            "tem_dado": tem_dado,
+        }
+    return {"ativos": [{"id": a.id, "nome": a.nome} for a in ativos],
+            "meses": out_meses, "anos": anos}
+
+
+@app.route("/rentabilidade")
+@login_required
+def rentabilidade():
+    return render_template("rentabilidade.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/rent")
+@login_required
+def api_rent(cid):
+    c = get_carteira_or_404(cid)
+    data = rent_compute(cid)
+    data["editavel"] = c.user_id == current_user.id
+    data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome}
+    return jsonify(data)
+
+
+@app.route("/api/carteira/<int:cid>/rent/ativos", methods=["POST"])
+@login_required
+def api_rent_add_ativo(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    nome = (request.get_json(force=True).get("nome") or "").strip()
+    if not nome:
+        return jsonify({"erro": "informe um nome"}), 400
+    maxord = db.session.query(db.func.coalesce(db.func.max(RentAtivo.ordem), 0)) \
+        .filter_by(carteira_id=cid).scalar()
+    a = RentAtivo(carteira_id=cid, nome=nome, ordem=maxord + 1)
+    db.session.add(a)
+    db.session.commit()
+    return jsonify({"ok": True, "id": a.id})
+
+
+@app.route("/api/rent/ativos/<int:aid>", methods=["PUT", "DELETE"])
+@login_required
+def api_rent_ativo(aid):
+    a = db.session.get(RentAtivo, aid)
+    if not a:
+        abort(404)
+    require_owner(db.session.get(Carteira, a.carteira_id))
+    if request.method == "DELETE":
+        db.session.delete(a)
+    else:
+        nome = (request.get_json(force=True).get("nome") or "").strip()
+        if nome:
+            a.nome = nome
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+RENT_FIELDS = {"valor_base", "aporte", "resgate", "proventos", "valor_final"}
+
+
+@app.route("/api/rent/mov", methods=["PUT"])
+@login_required
+def api_rent_mov():
+    d = request.get_json(force=True)
+    a = db.session.get(RentAtivo, int(d["ativo_id"]))
+    if not a:
+        abort(404)
+    require_owner(db.session.get(Carteira, a.carteira_id))
+    ano, mes = int(d["ano"]), int(d["mes"])
+    mv = RentMov.query.filter_by(ativo_id=a.id, ano=ano, mes=mes).first()
+    if not mv:
+        mv = RentMov(ativo_id=a.id, ano=ano, mes=mes)
+        db.session.add(mv)
+    for k, v in d.items():
+        if k in RENT_FIELDS:
+            setattr(mv, k, float(v or 0))
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 with app.app_context():

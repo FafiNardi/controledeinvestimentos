@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rentabilidade • Carteira</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2230; --panel2:#212c3d; --line:#2c3a4f;
+    --txt:#e6edf3; --muted:#8a9bb0; --accent:#2dd4bf; --blue:#3b82f6;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13px}
+  header{padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  h1{font-size:18px;margin:0;color:var(--accent);font-weight:700}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:6px;padding:6px 8px;font-size:13px}
+  button{background:var(--blue);color:#fff;border:0;border-radius:6px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line)}
+  .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
+  .userbox a{color:var(--accent);text-decoration:none}
+  .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
+            border-radius:20px;font-size:11px;font-weight:700}
+  .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:wrap}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+        padding:10px 16px;min-width:150px}
+  .stat .k{font-size:11px;color:var(--muted)}
+  .stat .v{font-size:18px;font-weight:700;margin-top:2px}
+  .tabs{display:flex;gap:6px;padding:4px 24px 10px;flex-wrap:wrap;align-items:center}
+  .tab{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+       padding:6px 14px;border-radius:20px;cursor:pointer;font-weight:600;font-size:12px}
+  .tab.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .mes-nav{display:flex;gap:6px;padding:0 24px 10px;flex-wrap:wrap}
+  .mes-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+       padding:5px 11px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px}
+  .mes-btn.on{background:var(--accent);color:#08302b;border-color:var(--accent)}
+  .mes-btn.tem{color:var(--txt)}
+  .wrap{padding:0 24px 40px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
+     text-transform:uppercase;letter-spacing:.3px}
+  td:first-child,th:first-child{text-align:left}
+  tr:hover td{background:rgba(255,255,255,.03)}
+  .tick{font-weight:700;color:var(--accent)}
+  td input{background:transparent;border:1px solid transparent;color:var(--txt);
+    text-align:right;width:110px;padding:4px;border-radius:5px;font-size:12.5px}
+  td input:hover{border-color:var(--line)}
+  td input:focus{border-color:var(--blue);background:var(--panel2);outline:0}
+  td input:disabled{border-color:transparent !important;opacity:1}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .muted{color:var(--muted)}
+  .del{color:var(--red);cursor:pointer;background:none;padding:2px 6px;font-size:15px}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:8px 24px 40px}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+  .chartbox h3{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
+  .chartbox.full{grid-column:1/-1}
+  @media(max-width:900px){.charts{grid-template-columns:1fr}}
+  .addbar{display:flex;gap:8px;align-items:center;margin:10px 0 20px}
+  .resumo-tab td,.resumo-tab th{font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>📈 Rentabilidade</h1>
+  <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
+    <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
+  </label>
+  <span id="roBadge"></span>
+  <button class="ghost" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <div class="userbox">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+</header>
+
+<div class="stats" id="stats"></div>
+<div class="tabs" id="anoTabs"></div>
+<div class="mes-nav" id="mesNav"></div>
+
+<div class="wrap">
+  <table id="tbl">
+    <thead><tr>
+      <th>Ativo</th><th>Valor base</th><th>Aporte (+)</th><th>Resgate (−)</th>
+      <th>Proventos</th><th>Valor final</th><th>Rent. mês</th><th>Peso</th><th></th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="addbar" id="addbar">
+    <input id="novoAtivo" placeholder="+ Novo ativo (ex.: Fundo DI, PETR4, IPCA+ 2035...)" style="width:320px">
+    <button onclick="addAtivo()">Adicionar ativo</button>
+    <span class="muted">O valor base é puxado automaticamente do mês anterior.</span>
+  </div>
+
+  <h3 style="color:var(--muted);margin:26px 0 8px">Resumo do ano <span id="anoLabel"></span></h3>
+  <table class="resumo-tab"><thead><tr id="resumoHead"></tr></thead><tbody id="resumoBody"></tbody></table>
+</div>
+
+<div class="charts">
+  <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><canvas id="chRet"></canvas></div>
+  <div class="chartbox"><h3>Dividendos recebidos no ano</h3><canvas id="chDiv"></canvas></div>
+  <div class="chartbox"><h3>Retorno acumulado (histórico completo)</h3><canvas id="chAcum"></canvas></div>
+  <div class="chartbox"><h3>Peso dos ativos em carteira</h3><canvas id="chPeso"></canvas></div>
+</div>
+
+<script>
+const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const BRL = v => (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const PCT = v => v==null ? '—' : (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+function smartNum(s){
+  s = String(s).replace(/[^\d.,-]/g,'');
+  if(s.includes(',') && s.includes('.')){
+    s = (s.lastIndexOf(',') > s.lastIndexOf('.'))
+      ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  } else if(s.includes(',')){ s = s.replace(',','.'); }
+  return parseFloat(s) || 0;
+}
+
+let DATA = null, CID = null, EDIT = false;
+let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
+let charts = {};
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  const minha = d.carteiras.find(c=>c.minha);
+  CID = (minha || d.carteiras[0]).id;
+  sel.value = CID;
+  await load();
+}
+function trocarCarteira(){ CID = parseInt(document.getElementById('selCarteira').value); load(); }
+
+async function load(){
+  const r = await fetch('/api/carteira/'+CID+'/rent');
+  DATA = await r.json();
+  EDIT = DATA.editavel;
+  document.getElementById('roBadge').innerHTML = EDIT ? '' :
+    `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
+  document.getElementById('addbar').style.display = EDIT ? '' : 'none';
+  if(DATA.anos.length && !DATA.anos.includes(ANO)) ANO = DATA.anos[DATA.anos.length-1];
+  render();
+}
+
+function mesKey(a,m){ return a+'-'+String(m).padStart(2,'0'); }
+function mesData(a,m){ return DATA.meses[mesKey(a,m)]; }
+
+function render(){
+  const anos = [...new Set([...DATA.anos, new Date().getFullYear()])].sort();
+  document.getElementById('anoTabs').innerHTML = anos.map(a=>
+    `<span class="tab ${a===ANO?'on':''}" onclick="ANO=${a};render()">${a}</span>`).join('') +
+    (EDIT?`<span class="tab" onclick="novoAno()">+ ano</span>`:'');
+  document.getElementById('mesNav').innerHTML = MESES.map((n,i)=>{
+    const md = mesData(ANO,i+1);
+    return `<span class="mes-btn ${i+1===MES?'on':''} ${md&&md.tem_dado?'tem':''}"
+      onclick="MES=${i+1};render()">${n}</span>`;
+  }).join('');
+  document.getElementById('anoLabel').textContent = ANO;
+  renderMes(); renderStats(); renderResumo(); renderCharts();
+}
+function novoAno(){
+  const a = prompt('Qual ano deseja adicionar? (ex.: 2027)');
+  if(a && /^\d{4}$/.test(a.trim())){ ANO = parseInt(a.trim()); MES = 1; render(); }
+}
+
+function renderMes(){
+  const tb = document.getElementById('rows');
+  const md = mesData(ANO,MES);
+  const dis = EDIT ? '' : 'disabled';
+  if(!DATA.ativos.length){
+    tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:26px;color:var(--muted)">
+      Nenhum ativo ainda — adicione o primeiro abaixo (ex.: Fundo DI, Ações, IPCA+...).</td></tr>`;
+    return;
+  }
+  const linhas = md ? md.linhas : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  tb.innerHTML = linhas.map(l=>{
+    const primeiraVez = !l.tem_mov && l.base===0;
+    return `<tr>
+      <td><span class="tick">${l.nome}</span></td>
+      <td>${primeiraVez && EDIT
+        ? `<input value="" placeholder="valor inicial" onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_base',this.value)">`
+        : `<span class="muted">${BRL(l.base)}</span>`}</td>
+      <td><input value="${l.aporte||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aporte',this.value)"></td>
+      <td><input value="${l.resgate||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
+      <td><input value="${l.proventos||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
+      <td><input value="${l.tem_mov?l.final:''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
+      <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
+      <td class="muted">${(l.peso*100).toFixed(1)}%</td>
+      <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderStats(){
+  const md = mesData(ANO,MES);
+  const meses = Object.values(DATA.meses).filter(m=>m.tem_dado);
+  const ultimo = meses.length ? meses[meses.length-1] : null;
+  const divAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="k">Patrimônio (${MESES[MES-1]}/${ANO})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
+    <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
+    <div class="stat"><div class="k">Acumulado histórico</div><div class="v ${ultimo&&ultimo.acumulado>=0?'pos':'neg'}">${ultimo?PCT(ultimo.acumulado):'—'}</div></div>
+    <div class="stat"><div class="k">Dividendos em ${ANO}</div><div class="v">${BRL(divAno)}</div></div>
+  `;
+}
+
+function renderResumo(){
+  document.getElementById('resumoHead').innerHTML =
+    '<th></th>'+MESES.map(m=>`<th>${m}</th>`).join('')+'<th>Total/Média</th>';
+  const linhas = [
+    ['Retorno %', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?PCT(m.rent):'—';},
+      ()=>{const vs=MESES.map((_,i)=>mesData(ANO,i+1)).filter(m=>m&&m.tem_dado&&m.rent!=null);
+           if(!vs.length)return '—';
+           const comp=vs.reduce((p,m)=>p*(1+m.rent),1)-1; return PCT(comp)+' no ano';}],
+    ['Patrimônio', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?BRL(m.patrimonio):'—';},
+      ()=>''],
+    ['Dividendos', i=>{const m=mesData(ANO,i);return m?BRL(m.dividendos):'—';},
+      ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);return BRL(t);}],
+    ['Aportes', i=>{const m=mesData(ANO,i);return m&&m.aportes?BRL(m.aportes):'—';},
+      ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.aportes:0);},0);return BRL(t);}],
+  ];
+  document.getElementById('resumoBody').innerHTML = linhas.map(([nome,fn,tot])=>
+    `<tr><td class="muted">${nome}</td>`+
+    MESES.map((_,i)=>{
+      const v = fn(i+1);
+      const cls = nome==='Retorno %' && v!=='—' ? (v.startsWith('-')?'neg':'pos') : '';
+      return `<td class="${cls}">${v}</td>`;
+    }).join('')+`<td><b>${tot()}</b></td></tr>`).join('');
+}
+
+function mkChart(id, cfg){
+  if(charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), cfg);
+}
+const GRID = {color:'rgba(255,255,255,.06)'};
+const TICKS = {color:'#8a9bb0'};
+
+function renderCharts(){
+  const rets = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
+  mkChart('chRet',{type:'bar',data:{labels:MESES,datasets:[{data:rets,
+    backgroundColor:rets.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)')}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
+      y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+  const divs = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m?m.dividendos:0;});
+  mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divs,backgroundColor:'rgba(45,212,191,.7)'}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
+      y:{grid:GRID,ticks:{...TICKS,callback:v=>'R$'+v.toLocaleString('pt-BR')}}}}});
+  const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
+  mkChart('chAcum',{type:'line',data:{labels:keys.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
+    datasets:[{data:keys.map(k=>DATA.meses[k].acumulado*100),borderColor:'#2dd4bf',
+      backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
+    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
+      y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+  let md = mesData(ANO,MES);
+  if(!md || !md.tem_dado){
+    const ks = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
+    md = ks.length ? DATA.meses[ks[ks.length-1]] : null;
+  }
+  const pesos = md ? md.linhas.filter(l=>l.final>0).sort((a,b)=>b.peso-a.peso) : [];
+  mkChart('chPeso',{type:'bar',data:{labels:pesos.map(l=>l.nome),
+    datasets:[{data:pesos.map(l=>l.peso*100),backgroundColor:'rgba(59,130,246,.7)'}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}},y:{grid:GRID,ticks:TICKS}}}});
+}
+
+async function mov(ativoId, campo, valor){
+  await fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})});
+  load();
+}
+async function addAtivo(){
+  const nome = document.getElementById('novoAtivo').value.trim();
+  if(!nome) return;
+  await fetch('/api/carteira/'+CID+'/rent/ativos',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome})});
+  document.getElementById('novoAtivo').value='';
+  load();
+}
+async function delAtivo(id){
+  if(!confirm('Excluir este ativo e TODO o seu histórico de lançamentos?')) return;
+  await fetch('/api/rent/ativos/'+id,{method:'DELETE'});
+  load();
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

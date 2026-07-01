@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Entrar • Carteira</title>
+<title>Recuperar senha • Carteira</title>
 <style>
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
        background:#0f1419;color:#e6edf3;font-family:-apple-system,Segoe UI,Roboto,sans-serif}
-  .card{background:#1a2230;border:1px solid #2c3a4f;border-radius:14px;padding:32px;width:330px}
+  .card{background:#1a2230;border:1px solid #2c3a4f;border-radius:14px;padding:32px;width:340px}
   h1{font-size:20px;color:#2dd4bf;margin:0 0 6px}
-  p.sub{color:#8a9bb0;margin:0 0 22px;font-size:13px}
+  p.sub{color:#8a9bb0;margin:0 0 22px;font-size:13px;line-height:1.5}
   label{display:block;font-size:12px;color:#8a9bb0;margin:14px 0 5px}
   .inp-wrap{position:relative}
   input{width:100%;box-sizing:border-box;background:#212c3d;border:1px solid #2c3a4f;
@@ -16,27 +16,36 @@
        cursor:pointer;color:#8a9bb0;font-size:16px;user-select:none;background:none;
        border:none;padding:0;line-height:1}
   .eye:hover{color:#e6edf3}
-  button[type=submit]{width:100%;margin-top:22px;background:#3b82f6;color:#fff;border:0;
-         border-radius:8px;padding:12px;font-size:14px;font-weight:600;cursor:pointer}
+  button[type=submit]{width:100%;margin-top:22px;background:#2dd4bf;color:#08302b;border:0;
+         border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
   .alt{margin-top:16px;text-align:center;font-size:13px;color:#8a9bb0}
   a{color:#2dd4bf;text-decoration:none}
-  .flash{background:rgba(239,68,68,.15);color:#f87171;padding:9px 12px;border-radius:8px;
+  .flash{background:rgba(45,212,191,.12);color:#2dd4bf;padding:9px 12px;border-radius:8px;
          font-size:13px;margin-bottom:8px}
+  .aviso{background:rgba(245,158,11,.12);color:#f59e0b;padding:10px 12px;border-radius:8px;
+         font-size:12.5px;margin-bottom:14px;line-height:1.5}
 </style></head><body>
 <form class="card" method="post">
-  <h1>📊 Carteira</h1>
-  <p class="sub">Rebalanceamento Dinâmico</p>
+  <h1>🔑 Recuperar senha</h1>
+  <p class="sub">Informe seu nome de usuário, a chave-mestra e a nova senha.</p>
   {% with msgs = get_flashed_messages() %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endwith %}
+  {% if not habilitado %}
+  <div class="aviso">⚠️ A chave-mestra ainda não foi configurada no servidor. Defina a variável <b>RESET_SECRET</b> no Render para ativar esta função.</div>
+  {% endif %}
   <label>Nome de usuário</label>
   <input name="nome" autofocus autocomplete="username">
-  <label>Senha</label>
+  <label>Chave-mestra</label>
   <div class="inp-wrap">
-    <input id="senha" name="senha" type="password" autocomplete="current-password">
-    <button type="button" class="eye" onclick="toggle('senha','olho1')" id="olho1">👁</button>
+    <input id="chave" name="chave" type="password">
+    <button type="button" class="eye" onclick="toggle('chave','o1')" id="o1">👁</button>
   </div>
-  <button type="submit">Entrar</button>
-  <div class="alt">Não tem conta? <a href="{{ url_for('register') }}">Criar conta</a></div>
-  <div class="alt"><a href="{{ url_for('recuperar') }}">Esqueci minha senha</a></div>
+  <label>Nova senha</label>
+  <div class="inp-wrap">
+    <input id="senha" name="senha" type="password" autocomplete="new-password">
+    <button type="button" class="eye" onclick="toggle('senha','o2')" id="o2">👁</button>
+  </div>
+  <button type="submit">Redefinir senha</button>
+  <div class="alt">Lembrou? <a href="{{ url_for('login') }}">Voltar ao login</a></div>
 </form>
 <script>
 function toggle(id, btnId){

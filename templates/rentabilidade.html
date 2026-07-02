@@ -72,8 +72,9 @@
   <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
     <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
   </label>
-  <span id="roBadge"></span>
+  <button onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
   <button class="ghost" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <span id="roBadge"></span>
   <div class="userbox">👤 {{ usuario }} · <a href="/logout">sair</a></div>
 </header>
 
@@ -84,7 +85,8 @@
 <div class="wrap">
   <table id="tbl">
     <thead><tr>
-      <th>Ativo</th><th title="Marque os fundos de caixa/DI que geram renda">Caixa/DI</th>
+      <th style="cursor:pointer;user-select:none" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
+      <th title="Marque os fundos de caixa/DI que geram renda">Caixa/DI</th>
       <th>Valor base</th><th>Aporte (+)</th><th>Resgate (−)</th>
       <th>Proventos</th><th>Valor final</th><th>Rent. mês</th><th>Peso</th><th></th>
     </tr></thead>
@@ -134,7 +136,21 @@ function smartNum(s){
 
 let DATA = null, CID = null, EDIT = false;
 let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
+let ORD_AZ = 0;   // 0 = ordem original, 1 = A-Z, -1 = Z-A
 let charts = {};
+
+function toggleOrdem(){ ORD_AZ = ORD_AZ===1 ? -1 : ORD_AZ===-1 ? 0 : 1;
+  document.getElementById('ordArr').textContent = ORD_AZ===1?'▲':ORD_AZ===-1?'▼':'';
+  renderMes(); }
+async function editarNome(id){
+  const a = (DATA.ativos||[]).find(x=>x.id===id);
+  const novo = prompt('Editar nome do ativo:', a ? a.nome : '');
+  if(novo===null) return;
+  const nome = novo.trim(); if(!nome) return;
+  await fetch('/api/rent/ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome})});
+  load();
+}
 
 async function carregarCarteiras(){
   const r = await fetch('/api/carteiras'); const d = await r.json();
@@ -164,7 +180,10 @@ function mesKey(a,m){ return a+'-'+String(m).padStart(2,'0'); }
 function mesData(a,m){ return DATA.meses[mesKey(a,m)]; }
 
 function render(){
-  const anos = [...new Set([...DATA.anos, new Date().getFullYear()])].sort();
+  // junta anos com dados + anos criados manualmente + ano atual, e preenche o intervalo
+  const base = [...DATA.anos, ...(DATA.anos_cfg||[]), new Date().getFullYear()];
+  const min = Math.min(...base), max = Math.max(...base);
+  const anos = []; for(let a=min; a<=max; a++) anos.push(a);
   document.getElementById('anoTabs').innerHTML = anos.map(a=>
     `<span class="tab ${a===ANO?'on':''}" onclick="ANO=${a};render()">${a}</span>`).join('') +
     (EDIT?`<span class="tab" onclick="novoAno()">+ ano</span>`:'');
@@ -176,9 +195,13 @@ function render(){
   document.getElementById('anoLabel').textContent = ANO;
   renderMes(); renderStats(); renderResumo(); renderCharts();
 }
-function novoAno(){
-  const a = prompt('Qual ano deseja adicionar? (ex.: 2027)');
-  if(a && /^\d{4}$/.test(a.trim())){ ANO = parseInt(a.trim()); MES = 1; render(); }
+async function novoAno(){
+  const a = prompt('Qual ano deseja adicionar? (ex.: 2017). Todos os anos entre ele e o atual aparecerão.');
+  if(!a || !/^\d{4}$/.test(a.trim())) return;
+  await fetch('/api/carteira/'+CID+'/rent/anos',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({ano:parseInt(a.trim())})});
+  ANO = parseInt(a.trim()); MES = 1;
+  load();
 }
 
 function renderMes(){
@@ -191,11 +214,18 @@ function renderMes(){
     return;
   }
   const caixaMap = {}; DATA.ativos.forEach(a=>caixaMap[a.id]=a.is_caixa);
-  const linhas = md ? md.linhas : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  let linhas = md ? md.linhas.filter(l=>l.mostrar!==false)
+                  : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  if(ORD_AZ) linhas = [...linhas].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')*ORD_AZ);
+  if(!linhas.length){
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">
+      Nenhum ativo ativo neste mês.</td></tr>`;
+    return;
+  }
   tb.innerHTML = linhas.map(l=>{
     const primeiraVez = !l.tem_mov && l.base===0;
     return `<tr>
-      <td><span class="tick">${l.nome}</span></td>
+      <td><span class="tick">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
       <td style="text-align:center"><input type="checkbox" ${caixaMap[l.ativo_id]?'checked':''} ${EDIT?'':'disabled'}
         title="conta na Geração de Caixa" onchange="toggleCaixa(${l.ativo_id},this.checked)"></td>
       <td>${primeiraVez && EDIT

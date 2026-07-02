@@ -79,9 +79,10 @@
   <label class="userbox" style="flex-direction:row">Carteira:
     <select id="selCarteira" class="selcart" onchange="trocarCarteira()"></select>
   </label>
+  <button onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+  <button class="ghost" onclick="location.href='/'">📊 Rebalanceamento</button>
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
-  <button class="ghost" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
   <span id="roBadge"></span>
   <div class="cfg">
     <label>Carteira Ideal

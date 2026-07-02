@@ -60,6 +60,7 @@ class Carteira(db.Model):
     nome = db.Column(db.String(120), nullable=False)
     carteira_ideal = db.Column(db.Float, default=0)
     renda_ref = db.Column(db.Float, default=3457)   # Renda Média Brasil (IBGE) p/ comparação
+    anos_json = db.Column(db.Text, default="")      # anos extras criados manualmente (ex.: "2017,2018")
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
 
 
@@ -487,6 +488,7 @@ def rent_compute(cid):
             mth = 1; y += 1
 
     ultimo_final = {a.id: None for a in ativos}   # carrega o saldo entre meses
+    ja_comecou = {a.id: False for a in ativos}    # já teve algum lançamento?
     acum = 1.0
     out_meses = {}
     for (y, mth) in serie:
@@ -515,10 +517,19 @@ def rent_compute(cid):
                 denom = base + aporte - resgate - prov
                 if denom:
                     rent = (final / denom) - 1
+            # decide se o ativo aparece na lista deste mês:
+            #  - aparece se teve lançamento, se ainda tem saldo, ou se nunca começou
+            #  - some se foi encerrado (saldo 0, sem lançamento, mas já operou antes)
+            if mv or base > 0 or not ja_comecou[a.id]:
+                mostrar = True
+            else:
+                mostrar = False
             linhas.append({"ativo_id": a.id, "nome": a.nome, "base": base,
                            "aporte": aporte, "resgate": resgate,
                            "proventos": prov, "final": final, "rent": rent,
-                           "tem_mov": bool(mv)})
+                           "tem_mov": bool(mv), "mostrar": mostrar})
+            if mv:
+                ja_comecou[a.id] = True
             tot["base"] += base; tot["aporte"] += aporte
             tot["resgate"] += resgate; tot["proventos"] += prov
             tot["final"] += final
@@ -560,9 +571,30 @@ def api_rent(cid):
     c = get_carteira_or_404(cid)
     data = rent_compute(cid)
     data["editavel"] = c.user_id == current_user.id
+    anos_cfg = [int(x) for x in (c.anos_json or "").split(",") if x.strip().isdigit()]
     data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome,
                         "renda_ref": c.renda_ref or 3457}
+    data["anos_cfg"] = anos_cfg
     return jsonify(data)
+
+
+@app.route("/api/carteira/<int:cid>/rent/anos", methods=["POST"])
+@login_required
+def api_rent_add_ano(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True)
+    atuais = {int(x) for x in (c.anos_json or "").split(",") if x.strip().isdigit()}
+    # aceita um ano só {ano} ou uma lista {anos:[...]}
+    novos = d.get("anos") or ([d.get("ano")] if d.get("ano") else [])
+    for a in novos:
+        try:
+            atuais.add(int(a))
+        except (TypeError, ValueError):
+            pass
+    c.anos_json = ",".join(str(x) for x in sorted(atuais))
+    db.session.commit()
+    return jsonify({"ok": True, "anos": sorted(atuais)})
 
 
 @app.route("/api/carteira/<int:cid>/rent/ativos", methods=["POST"])
@@ -637,6 +669,7 @@ def ensure_schema():
                 db.session.commit()
 
     add("carteira", "renda_ref", "renda_ref FLOAT DEFAULT 3457")
+    add("carteira", "anos_json", "anos_json TEXT")
     add("rent_ativo", "is_caixa", "is_caixa INTEGER DEFAULT 0")
 
 

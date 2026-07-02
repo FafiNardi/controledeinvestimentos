@@ -81,6 +81,7 @@
   </label>
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
+  <button class="ghost" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
   <span id="roBadge"></span>
   <div class="cfg">
     <label>Carteira Ideal
@@ -172,8 +173,8 @@ function fillSelect(sel, opts, val){
 
 let STATE = {assets:[]};
 let CARTEIRAS = [];
-let CID = null;
-let EDIT = false;
+let CID = null;            // carteira selecionada
+let EDIT = false;          // posso editar a carteira atual?
 let SORT = {field:null, dir:1};
 
 async function carregarCarteiras(){
@@ -185,6 +186,7 @@ async function carregarCarteiras(){
     const tag = c.minha ? '' : ' · '+c.dono;
     return `<option value="${c.id}">${c.nome}${tag}${c.minha?'  (minha)':''}</option>`;
   }).join('');
+  // mantém seleção atual ou escolhe a primeira "minha"
   if(!CID || !CARTEIRAS.find(c=>c.id===CID)){
     const minha = CARTEIRAS.find(c=>c.minha);
     CID = (minha || CARTEIRAS[0]).id;

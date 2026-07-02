@@ -241,21 +241,25 @@ const GRID = {color:'rgba(255,255,255,.06)'};
 const TICKS = {color:'#8a9bb0'};
 
 function renderCharts(){
+  // 1. retorno mês a mês do ano
   const rets = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
   mkChart('chRet',{type:'bar',data:{labels:MESES,datasets:[{data:rets,
     backgroundColor:rets.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)')}]},
     options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
       y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+  // 2. dividendos do ano
   const divs = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m?m.dividendos:0;});
   mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divs,backgroundColor:'rgba(45,212,191,.7)'}]},
     options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
       y:{grid:GRID,ticks:{...TICKS,callback:v=>'R$'+v.toLocaleString('pt-BR')}}}}});
+  // 3. acumulado histórico
   const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
   mkChart('chAcum',{type:'line',data:{labels:keys.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
     datasets:[{data:keys.map(k=>DATA.meses[k].acumulado*100),borderColor:'#2dd4bf',
       backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
     options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
       y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+  // 4. peso dos ativos (mês selecionado ou último com dado)
   let md = mesData(ANO,MES);
   if(!md || !md.tem_dado){
     const ks = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);

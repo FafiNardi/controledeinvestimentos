@@ -59,6 +59,7 @@ class Carteira(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     nome = db.Column(db.String(120), nullable=False)
     carteira_ideal = db.Column(db.Float, default=0)
+    renda_ref = db.Column(db.Float, default=3457)   # Renda Média Brasil (IBGE) p/ comparação
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
 
 
@@ -87,6 +88,7 @@ class RentAtivo(db.Model):
     carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
     nome = db.Column(db.String(80), nullable=False)
     ordem = db.Column(db.Integer, default=0)
+    is_caixa = db.Column(db.Integer, default=0)   # 1 = fundo caixa/DI (entra na Geração de Caixa)
     movs = db.relationship("RentMov", backref="ativo", cascade="all, delete-orphan")
 
 
@@ -357,6 +359,8 @@ def api_config(cid):
     data = request.get_json(force=True)
     if "carteira_ideal" in data:
         c.carteira_ideal = float(data["carteira_ideal"] or 0)
+    if "renda_ref" in data:
+        c.renda_ref = float(data["renda_ref"] or 0)
     if data.get("nome"):
         c.nome = data["nome"].strip()
     db.session.commit()
@@ -459,13 +463,15 @@ def rent_compute(cid):
     """
     ativos = RentAtivo.query.filter_by(carteira_id=cid) \
         .order_by(RentAtivo.ordem, RentAtivo.id).all()
+    caixa_ids = {a.id for a in ativos if a.is_caixa}
     movs = {}
     for a in ativos:
         for m in a.movs:
             movs[(a.id, m.ano, m.mes)] = m
+    ativos_out = [{"id": a.id, "nome": a.nome, "is_caixa": bool(a.is_caixa)}
+                  for a in ativos]
     if not movs:
-        return {"ativos": [{"id": a.id, "nome": a.nome} for a in ativos],
-                "meses": {}, "anos": []}
+        return {"ativos": ativos_out, "meses": {}, "anos": []}
 
     periodos = sorted({(m.ano, m.mes) for m in movs.values()})
     anos = sorted({p[0] for p in periodos})
@@ -487,6 +493,7 @@ def rent_compute(cid):
         linhas = []
         tot = {"base": 0.0, "aporte": 0.0, "resgate": 0.0,
                "proventos": 0.0, "final": 0.0}
+        geracao_caixa = 0.0   # rendimento puro dos fundos caixa/DI no mês
         tem_dado = False
         for a in ativos:
             mv = movs.get((a.id, y, mth))
@@ -515,6 +522,9 @@ def rent_compute(cid):
             tot["base"] += base; tot["aporte"] += aporte
             tot["resgate"] += resgate; tot["proventos"] += prov
             tot["final"] += final
+            # geração de caixa = rendimento do ativo (só p/ fundos caixa/DI)
+            if a.id in caixa_ids and mv:
+                geracao_caixa += final - base - aporte + resgate + prov
             ultimo_final[a.id] = final
         # retorno da carteira no mês
         rent_cart = None
@@ -529,12 +539,13 @@ def rent_compute(cid):
             "ano": y, "mes": mth, "linhas": linhas,
             "patrimonio": tot["final"], "aportes": tot["aporte"],
             "resgates": tot["resgate"], "dividendos": tot["proventos"],
+            "geracao_caixa": geracao_caixa if tem_dado else 0,
+            "geracao_total": (geracao_caixa + tot["proventos"]) if tem_dado else 0,
             "rent": rent_cart if tem_dado else None,
             "acumulado": (acum - 1) if tem_dado else None,
             "tem_dado": tem_dado,
         }
-    return {"ativos": [{"id": a.id, "nome": a.nome} for a in ativos],
-            "meses": out_meses, "anos": anos}
+    return {"ativos": ativos_out, "meses": out_meses, "anos": anos}
 
 
 @app.route("/rentabilidade")
@@ -549,7 +560,8 @@ def api_rent(cid):
     c = get_carteira_or_404(cid)
     data = rent_compute(cid)
     data["editavel"] = c.user_id == current_user.id
-    data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome}
+    data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome,
+                        "renda_ref": c.renda_ref or 3457}
     return jsonify(data)
 
 
@@ -579,9 +591,12 @@ def api_rent_ativo(aid):
     if request.method == "DELETE":
         db.session.delete(a)
     else:
-        nome = (request.get_json(force=True).get("nome") or "").strip()
+        d = request.get_json(force=True)
+        nome = (d.get("nome") or "").strip()
         if nome:
             a.nome = nome
+        if "is_caixa" in d:
+            a.is_caixa = 1 if d["is_caixa"] else 0
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -609,8 +624,25 @@ def api_rent_mov():
     return jsonify({"ok": True})
 
 
+def ensure_schema():
+    """Adiciona colunas novas em tabelas já existentes (SQLite e PostgreSQL)."""
+    from sqlalchemy import inspect, text
+    insp = inspect(db.engine)
+
+    def add(tabela, coluna, ddl):
+        if insp.has_table(tabela):
+            cols = [c["name"] for c in insp.get_columns(tabela)]
+            if coluna not in cols:
+                db.session.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {ddl}"))
+                db.session.commit()
+
+    add("carteira", "renda_ref", "renda_ref FLOAT DEFAULT 3457")
+    add("rent_ativo", "is_caixa", "is_caixa INTEGER DEFAULT 0")
+
+
 with app.app_context():
     db.create_all()
+    ensure_schema()
 
 
 if __name__ == "__main__":

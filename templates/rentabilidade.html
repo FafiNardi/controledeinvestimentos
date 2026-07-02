@@ -84,7 +84,8 @@
 <div class="wrap">
   <table id="tbl">
     <thead><tr>
-      <th>Ativo</th><th>Valor base</th><th>Aporte (+)</th><th>Resgate (−)</th>
+      <th>Ativo</th><th title="Marque os fundos de caixa/DI que geram renda">Caixa/DI</th>
+      <th>Valor base</th><th>Aporte (+)</th><th>Resgate (−)</th>
       <th>Proventos</th><th>Valor final</th><th>Rent. mês</th><th>Peso</th><th></th>
     </tr></thead>
     <tbody id="rows"></tbody>
@@ -104,6 +105,18 @@
   <div class="chartbox"><h3>Dividendos recebidos no ano</h3><canvas id="chDiv"></canvas></div>
   <div class="chartbox"><h3>Retorno acumulado (histórico completo)</h3><canvas id="chAcum"></canvas></div>
   <div class="chartbox"><h3>Peso dos ativos em carteira</h3><canvas id="chPeso"></canvas></div>
+  <div class="chartbox full"><h3>Geração de Caixa + Proventos (mês a mês)</h3><canvas id="chGer" style="max-height:260px"></canvas></div>
+</div>
+
+<div class="wrap">
+  <h3 style="color:var(--muted);margin:6px 0 8px">Renda passiva gerada</h3>
+  <div class="stats" style="padding:0 0 10px">
+    <div class="stat"><div class="k">Média mensal (ger. caixa + prov.)</div><div class="v" id="indMedia">—</div></div>
+    <div class="stat"><div class="k">Renda de referência (IBGE)
+      <input id="rendaRef" style="width:90px;margin-left:6px" onchange="saveRenda()"></div>
+      <div class="v" id="indPct">—</div></div>
+    <div class="stat"><div class="k">Total no ano</div><div class="v" id="indTotal">—</div></div>
+  </div>
 </div>
 
 <script>
@@ -173,15 +186,18 @@ function renderMes(){
   const md = mesData(ANO,MES);
   const dis = EDIT ? '' : 'disabled';
   if(!DATA.ativos.length){
-    tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:26px;color:var(--muted)">
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:26px;color:var(--muted)">
       Nenhum ativo ainda — adicione o primeiro abaixo (ex.: Fundo DI, Ações, IPCA+...).</td></tr>`;
     return;
   }
+  const caixaMap = {}; DATA.ativos.forEach(a=>caixaMap[a.id]=a.is_caixa);
   const linhas = md ? md.linhas : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
   tb.innerHTML = linhas.map(l=>{
     const primeiraVez = !l.tem_mov && l.base===0;
     return `<tr>
       <td><span class="tick">${l.nome}</span></td>
+      <td style="text-align:center"><input type="checkbox" ${caixaMap[l.ativo_id]?'checked':''} ${EDIT?'':'disabled'}
+        title="conta na Geração de Caixa" onchange="toggleCaixa(${l.ativo_id},this.checked)"></td>
       <td>${primeiraVez && EDIT
         ? `<input value="" placeholder="valor inicial" onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_base',this.value)">`
         : `<span class="muted">${BRL(l.base)}</span>`}</td>
@@ -201,11 +217,13 @@ function renderStats(){
   const meses = Object.values(DATA.meses).filter(m=>m.tem_dado);
   const ultimo = meses.length ? meses[meses.length-1] : null;
   const divAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);
+  const gerAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_total:0);},0);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Patrimônio (${MESES[MES-1]}/${ANO})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
     <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
     <div class="stat"><div class="k">Acumulado histórico</div><div class="v ${ultimo&&ultimo.acumulado>=0?'pos':'neg'}">${ultimo?PCT(ultimo.acumulado):'—'}</div></div>
     <div class="stat"><div class="k">Dividendos em ${ANO}</div><div class="v">${BRL(divAno)}</div></div>
+    <div class="stat"><div class="k">Ger. caixa + proventos ${ANO}</div><div class="v" style="color:var(--accent)">${BRL(gerAno)}</div></div>
   `;
 }
 
@@ -221,6 +239,10 @@ function renderResumo(){
       ()=>''],
     ['Dividendos', i=>{const m=mesData(ANO,i);return m?BRL(m.dividendos):'—';},
       ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);return BRL(t);}],
+    ['Geração de caixa', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?BRL(m.geracao_caixa):'—';},
+      ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_caixa:0);},0);return BRL(t);}],
+    ['Ger. caixa + prov.', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?BRL(m.geracao_total):'—';},
+      ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_total:0);},0);return BRL(t);}],
     ['Aportes', i=>{const m=mesData(ANO,i);return m&&m.aportes?BRL(m.aportes):'—';},
       ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.aportes:0);},0);return BRL(t);}],
   ];
@@ -270,6 +292,26 @@ function renderCharts(){
     datasets:[{data:pesos.map(l=>l.peso*100),backgroundColor:'rgba(59,130,246,.7)'}]},
     options:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}},y:{grid:GRID,ticks:TICKS}}}});
+  // 5. geração de caixa + proventos mês a mês (barras empilhadas)
+  const gcx = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
+  const gdv = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.dividendos:null;});
+  mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
+    {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
+    {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},
+    options:{plugins:{legend:{labels:{color:'#8a9bb0'}}},
+      scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
+        y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:v=>'R$'+v.toLocaleString('pt-BR')}}}}});
+  // indicadores de renda passiva
+  const mesesComDado = MESES.map((_,i)=>mesData(ANO,i+1)).filter(m=>m&&m.tem_dado);
+  const totalGer = mesesComDado.reduce((s,m)=>s+m.geracao_total,0);
+  const media = mesesComDado.length ? totalGer/mesesComDado.length : 0;
+  const rref = (DATA.carteira && DATA.carteira.renda_ref) || 3457;
+  document.getElementById('indMedia').textContent = BRL(media);
+  document.getElementById('indTotal').textContent = BRL(totalGer);
+  document.getElementById('indPct').textContent = rref ? (media/rref*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%' : '—';
+  const ri = document.getElementById('rendaRef');
+  if(document.activeElement!==ri){ ri.value = rref; }
+  ri.disabled = !EDIT;
 }
 
 async function mov(ativoId, campo, valor){
@@ -288,6 +330,17 @@ async function addAtivo(){
 async function delAtivo(id){
   if(!confirm('Excluir este ativo e TODO o seu histórico de lançamentos?')) return;
   await fetch('/api/rent/ativos/'+id,{method:'DELETE'});
+  load();
+}
+async function toggleCaixa(id, val){
+  await fetch('/api/rent/ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({is_caixa: val?1:0})});
+  load();
+}
+async function saveRenda(){
+  const v = smartNum(document.getElementById('rendaRef').value);
+  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({renda_ref: v})});
   load();
 }
 

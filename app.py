@@ -338,7 +338,7 @@ def api_state(cid):
     computed, total = compute_rows(assets, c.carteira_ideal or 0)
     return jsonify({
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome,
-                     "carteira_ideal": c.carteira_ideal or 0,
+                     "carteira_ideal": c.carteira_ideal or 0, "moeda": c.moeda or "BRL",
                      "editavel": c.user_id == current_user.id},
         "assets": computed,
         "total_tenho": total,

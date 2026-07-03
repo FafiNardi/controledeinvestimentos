@@ -4,12 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rentabilidade • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#0f1419; --panel:#1a2230; --panel2:#212c3d; --line:#2c3a4f;
     --txt:#e6edf3; --muted:#8a9bb0; --accent:#2dd4bf; --blue:#3b82f6;
     --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+  }
+  html[data-theme="light"]{
+    --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f5; --line:#d7dee6;
+    --txt:#1a2230; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#2563eb;
+    --green:#16a34a; --red:#dc2626; --amber:#d97706;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
@@ -50,9 +56,10 @@
   th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
      text-transform:uppercase;letter-spacing:.3px;position:relative;overflow:hidden}
-  .resizer{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;
-           z-index:3}
-  .resizer:hover,.resizer.active{background:var(--blue)}
+  .resizer{position:absolute;right:0;top:0;width:10px;height:100%;cursor:col-resize;z-index:3}
+  .resizer::after{content:'';position:absolute;right:3px;top:15%;width:2px;height:70%;
+                  background:var(--line);border-radius:2px}
+  .resizer:hover::after,.resizer.active::after{background:var(--blue);width:3px;right:2.5px}
   td:first-child,th:first-child{text-align:left}
   tr:hover td{background:rgba(255,255,255,.03)}
   .tick{font-weight:700;color:var(--accent)}
@@ -85,21 +92,23 @@
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   <span id="roBadge"></span>
-  <div class="userbox">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  <div class="userbox">
+    <button class="ghost" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    👤 {{ usuario }} · <a href="/logout">sair</a>
+  </div>
 </header>
 
 <div class="stats" id="stats"></div>
 <div class="tabs" id="anoTabs"></div>
 <div class="mes-nav" id="mesNav"></div>
 
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-    <label class="muted" style="display:flex;align-items:center;gap:6px">Moeda:
+  <div style="display:flex;align-items:center;margin-bottom:10px">
+    <label class="muted" style="display:flex;align-items:center;gap:6px;margin-left:auto">Moeda:
       <select id="selMoeda" onchange="saveMoeda()">
         <option value="BRL">R$ Real</option>
         <option value="USD">US$ Dólar</option>
       </select>
     </label>
-    <span class="muted" style="font-size:11px">Arraste a borda direita de cada coluna para redimensionar</span>
   </div>
   <table id="tbl" style="table-layout:fixed">
     <thead><tr>
@@ -141,7 +150,13 @@
 
 <script>
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-const CLASSES_RENT = ['','Caixa','Renda Fixa','Tesouro Direto','Ações','FII','FII Infra'];
+const CLASSES_RENT_BRL = ['Ações','Caixa','ETF','FII','FII Infra','Fundo de Investimento','Renda Fixa','Tesouro Direto']
+  .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+const CLASSES_RENT_USD = ['Bond','Cash','ETF','REIT','Stocks']
+  .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+const CLASSE_BRL_TO_USD = {'Renda Fixa':'Bond','FII':'REIT','Ações':'Stocks','ETF':'ETF','Caixa':'Cash'};
+const CLASSE_USD_TO_BRL = {'Bond':'Renda Fixa','REIT':'FII','Stocks':'Ações','ETF':'ETF','Cash':'Caixa'};
+function classesAtuais(){ return ['', ...(MOEDA==='USD'?CLASSES_RENT_USD:CLASSES_RENT_BRL)]; }
 let MOEDA = 'BRL';
 const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => v==null ? '—' : (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
@@ -247,13 +262,17 @@ function renderMes(){
     return;
   }
   const moedaHint = MOEDA==='USD' ? 'US$ 0,00' : 'R$ 0,00';
+  const listaClasses = classesAtuais();
   tb.innerHTML = linhas.map(l=>{
     const primeiraVez = !l.tem_mov && l.base===0;
+    const classeAtual = classeMap[l.ativo_id];
+    const opcoes = listaClasses.includes(classeAtual) || !classeAtual
+      ? listaClasses : [...listaClasses, classeAtual];
     return `<tr>
       <td><span class="tick">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
       <td style="text-align:center">
         <select ${EDIT?'':'disabled'} onchange="setClasse(${l.ativo_id},this.value)">
-          ${CLASSES_RENT.map(c=>`<option value="${c}" ${classeMap[l.ativo_id]===c?'selected':''}>${c||'—'}</option>`).join('')}
+          ${opcoes.map(c=>`<option value="${c}" ${classeAtual===c?'selected':''}>${c||'—'}</option>`).join('')}
         </select>
       </td>
       <td>${primeiraVez && EDIT
@@ -402,10 +421,23 @@ async function saveRenda(){
   load();
 }
 async function saveMoeda(){
-  MOEDA = document.getElementById('selMoeda').value;
+  const nova = document.getElementById('selMoeda').value;
+  const mapa = nova==='USD' ? CLASSE_BRL_TO_USD : CLASSE_USD_TO_BRL;
+  const traducoes = (DATA.ativos||[])
+    .filter(a => mapa[a.classe])
+    .map(a => fetch('/api/rent/ativos/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({classe: mapa[a.classe]})}));
+  await Promise.all(traducoes);
+  MOEDA = nova;
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({moeda: MOEDA})});
   load();
+}
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
 }
 async function renomearCarteira(){
   if(!CID || !DATA.carteira) return;
@@ -459,6 +491,8 @@ function makeResizable(){
   });
 }
 
+document.getElementById('btnTema').textContent =
+  document.documentElement.getAttribute('data-theme')==='light' ? '☀️' : '🌙';
 carregarCarteiras();
 makeResizable();
 </script>

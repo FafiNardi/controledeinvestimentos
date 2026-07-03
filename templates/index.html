@@ -4,11 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Carteira • Rebalanceamento Dinâmico</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
 <style>
   :root{
     --bg:#0f1419; --panel:#1a2230; --panel2:#212c3d; --line:#2c3a4f;
     --txt:#e6edf3; --muted:#8a9bb0; --accent:#2dd4bf; --blue:#3b82f6;
     --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+  }
+  html[data-theme="light"]{
+    --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f5; --line:#d7dee6;
+    --txt:#1a2230; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#2563eb;
+    --green:#16a34a; --red:#dc2626; --amber:#d97706;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
@@ -90,13 +96,22 @@
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   <span id="roBadge"></span>
   <div class="cfg">
+    <label>Moeda
+      <select id="selMoeda" onchange="saveMoeda()">
+        <option value="BRL">R$ Real</option>
+        <option value="USD">US$ Dólar</option>
+      </select>
+    </label>
     <label>Carteira Ideal
       <input id="carteiraIdeal" type="text" onchange="saveConfig()"
              onfocus="this.select()" placeholder="R$ 0.00">
     </label>
     <button onclick="refresh()" id="btnRefresh">⟳ Atualizar cotações</button>
     <span id="status"></span>
-    <div class="userbox">👤 {{ usuario }} · <a href="{{ url_for('logout') }}">sair</a></div>
+    <div class="userbox">
+      <button class="ghost" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+      👤 {{ usuario }} · <a href="{{ url_for('logout') }}">sair</a>
+    </div>
   </div>
 </header>
 
@@ -161,9 +176,10 @@ const SEGMENTOS = ["", "Elétrica", "Bancos", "Fdo. de Inv.", "Fundo de Fundos",
   "Tesouro Direto", "Financeira", "Lajes Corp.", "Papel", "Híbrido", "Petróleo",
   "Seguradora", "Saneamento", "Agrícola", "Mineração", "Telecomunicação", "Outro"];
 
-const BRL = v => (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+let MOEDA = 'BRL';
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const NUM = (v,d=2) => (v||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtUS = v => 'R$ ' + (v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtUS = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct = v => (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) + '%';
 function smartNum(s){
   s = String(s).replace(/[^\d.,-]/g,'');
@@ -219,6 +235,9 @@ async function load(){
   if(!r.ok){ return; }
   STATE = await r.json();
   EDIT = STATE.carteira.editavel;
+  MOEDA = STATE.carteira.moeda || 'BRL';
+  document.getElementById('selMoeda').value = MOEDA;
+  document.getElementById('carteiraIdeal').placeholder = MOEDA==='USD' ? 'US$ 0.00' : 'R$ 0.00';
   document.getElementById('carteiraIdeal').value = STATE.carteira.carteira_ideal ? fmtUS(STATE.carteira.carteira_ideal) : '';
   document.getElementById('carteiraIdeal').disabled = !EDIT;
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
@@ -289,7 +308,7 @@ function renderRows(){
     return `<tr data-id="${a.id}">
       <td><span class="tick">${a.ticker}</span>${a.manual?' <span class="muted">✎</span>':''}</td>
       <td>${a.manual
-            ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="R$ 0,00" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',smartNum(this.value))">`
+            ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="${MOEDA==='USD'?'US$ 0,00':'R$ 0,00'}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',smartNum(this.value))">`
             : BRL(a.preco)}</td>
       <td><input type="text" class="vpa-inp" value="${a.vpa?BRL(a.vpa):''}" placeholder="—" ${dis} onfocus="this.select()" onchange="updVpa(${a.id},this.value)"></td>
       <td class="muted">${a.pvp?NUM(a.pvp):'—'}</td>
@@ -354,6 +373,19 @@ async function addAsset(){
   ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
   st.textContent=''; load();
 }
+async function saveMoeda(){
+  if(!CID) return;
+  MOEDA = document.getElementById('selMoeda').value;
+  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({moeda: MOEDA})});
+  load();
+}
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
 async function renomearCarteira(){
   if(!CID || !STATE.carteira) return;
   const novo = prompt('Novo nome da carteira:', STATE.carteira.nome);
@@ -382,6 +414,8 @@ fillSelect(document.getElementById('newClasse'), CLASSES, '');
 fillSelect(document.getElementById('newSeg'), SEGMENTOS, '');
 document.querySelectorAll('th.sortable').forEach(th=>
   th.addEventListener('click', ()=> setSort(th.dataset.sort)));
+document.getElementById('btnTema').textContent =
+  document.documentElement.getAttribute('data-theme')==='light' ? '☀️' : '🌙';
 carregarCarteiras();
 </script>
 </body>

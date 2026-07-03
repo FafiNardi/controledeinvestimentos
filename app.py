@@ -61,6 +61,7 @@ class Carteira(db.Model):
     carteira_ideal = db.Column(db.Float, default=0)
     renda_ref = db.Column(db.Float, default=3457)   # Renda Média Brasil (IBGE) p/ comparação
     anos_json = db.Column(db.Text, default="")      # anos extras criados manualmente (ex.: "2017,2018")
+    moeda = db.Column(db.String(3), default="BRL")  # BRL ou USD (só formatação de exibição)
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
 
 
@@ -89,7 +90,8 @@ class RentAtivo(db.Model):
     carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
     nome = db.Column(db.String(80), nullable=False)
     ordem = db.Column(db.Integer, default=0)
-    is_caixa = db.Column(db.Integer, default=0)   # 1 = fundo caixa/DI (entra na Geração de Caixa)
+    is_caixa = db.Column(db.Integer, default=0)   # legado; substituído por classe == "Caixa"
+    classe = db.Column(db.String(30), default="")  # Caixa, Renda Fixa, Tesouro Direto, Ações, FII, FII Infra
     movs = db.relationship("RentMov", backref="ativo", cascade="all, delete-orphan")
 
 
@@ -362,6 +364,8 @@ def api_config(cid):
         c.carteira_ideal = float(data["carteira_ideal"] or 0)
     if "renda_ref" in data:
         c.renda_ref = float(data["renda_ref"] or 0)
+    if data.get("moeda") in ("BRL", "USD"):
+        c.moeda = data["moeda"]
     if data.get("nome"):
         c.nome = data["nome"].strip()
     db.session.commit()
@@ -464,12 +468,12 @@ def rent_compute(cid):
     """
     ativos = RentAtivo.query.filter_by(carteira_id=cid) \
         .order_by(RentAtivo.ordem, RentAtivo.id).all()
-    caixa_ids = {a.id for a in ativos if a.is_caixa}
+    caixa_ids = {a.id for a in ativos if (a.classe or "") == "Caixa" or a.is_caixa}
     movs = {}
     for a in ativos:
         for m in a.movs:
             movs[(a.id, m.ano, m.mes)] = m
-    ativos_out = [{"id": a.id, "nome": a.nome, "is_caixa": bool(a.is_caixa)}
+    ativos_out = [{"id": a.id, "nome": a.nome, "classe": a.classe or ""}
                   for a in ativos]
     if not movs:
         return {"ativos": ativos_out, "meses": {}, "anos": []}
@@ -573,7 +577,7 @@ def api_rent(cid):
     data["editavel"] = c.user_id == current_user.id
     anos_cfg = [int(x) for x in (c.anos_json or "").split(",") if x.strip().isdigit()]
     data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome,
-                        "renda_ref": c.renda_ref or 3457}
+                        "renda_ref": c.renda_ref or 3457, "moeda": c.moeda or "BRL"}
     data["anos_cfg"] = anos_cfg
     return jsonify(data)
 
@@ -627,8 +631,8 @@ def api_rent_ativo(aid):
         nome = (d.get("nome") or "").strip()
         if nome:
             a.nome = nome
-        if "is_caixa" in d:
-            a.is_caixa = 1 if d["is_caixa"] else 0
+        if "classe" in d:
+            a.classe = (d["classe"] or "").strip()
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -670,7 +674,16 @@ def ensure_schema():
 
     add("carteira", "renda_ref", "renda_ref FLOAT DEFAULT 3457")
     add("carteira", "anos_json", "anos_json TEXT")
+    add("carteira", "moeda", "moeda VARCHAR(3) DEFAULT 'BRL'")
     add("rent_ativo", "is_caixa", "is_caixa INTEGER DEFAULT 0")
+    add("rent_ativo", "classe", "classe VARCHAR(30) DEFAULT ''")
+    if insp.has_table("rent_ativo"):
+        cols = [c["name"] for c in insp.get_columns("rent_ativo")]
+        if "classe" in cols and "is_caixa" in cols:
+            db.session.execute(text(
+                "UPDATE rent_ativo SET classe='Caixa' WHERE is_caixa=1 "
+                "AND (classe IS NULL OR classe='')"))
+            db.session.commit()
 
 
 with app.app_context():

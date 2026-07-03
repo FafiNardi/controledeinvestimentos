@@ -27,6 +27,10 @@
   button:hover{filter:brightness(1.1)}
   button.ghost{background:var(--panel2);border:1px solid var(--line)}
   button:disabled{opacity:.45;cursor:not-allowed}
+  .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
+            border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+  .nav-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .nav-btn:hover{filter:brightness(1.1)}
   .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
   .userbox a{color:var(--accent);text-decoration:none}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
@@ -79,8 +83,9 @@
   <label class="userbox" style="flex-direction:row">Carteira:
     <select id="selCarteira" class="selcart" onchange="trocarCarteira()"></select>
   </label>
-  <button onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
-  <button class="ghost" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
+  <button class="nav-btn" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+  <button class="nav-btn on" onclick="location.href='/'">📊 Rebalanceamento</button>
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   <span id="roBadge"></span>
@@ -220,6 +225,7 @@ async function load(){
      `<span class="ro-badge">👁 Somente leitura · de ${STATE.carteira.dono}</span>`;
   document.getElementById('addfoot').style.display = EDIT ? '' : 'none';
   document.getElementById('btnDelCart').style.display = EDIT ? '' : 'none';
+  document.getElementById('btnRenomear').style.display = EDIT ? '' : 'none';
   renderTudo();
 }
 
@@ -347,6 +353,14 @@ async function addAsset(){
     })});
   ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
   st.textContent=''; load();
+}
+async function renomearCarteira(){
+  if(!CID || !STATE.carteira) return;
+  const novo = prompt('Novo nome da carteira:', STATE.carteira.nome);
+  if(!novo || !novo.trim()) return;
+  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: novo.trim()})});
+  carregarCarteiras();
 }
 async function deletarCarteira(){
   const nome = STATE.carteira ? STATE.carteira.nome : 'esta carteira';

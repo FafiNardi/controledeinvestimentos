@@ -23,6 +23,10 @@
          padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
   button:hover{filter:brightness(1.1)}
   button.ghost{background:var(--panel2);border:1px solid var(--line)}
+  .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
+            border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+  .nav-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .nav-btn:hover{filter:brightness(1.1)}
   .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
   .userbox a{color:var(--accent);text-decoration:none}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
@@ -45,7 +49,10 @@
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
   th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
-     text-transform:uppercase;letter-spacing:.3px}
+     text-transform:uppercase;letter-spacing:.3px;position:relative;overflow:hidden}
+  .resizer{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;
+           z-index:3}
+  .resizer:hover,.resizer.active{background:var(--blue)}
   td:first-child,th:first-child{text-align:left}
   tr:hover td{background:rgba(255,255,255,.03)}
   .tick{font-weight:700;color:var(--accent)}
@@ -72,8 +79,11 @@
   <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
     <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
   </label>
-  <button onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
-  <button class="ghost" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
+  <button class="nav-btn on" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+  <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
+  <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   <span id="roBadge"></span>
   <div class="userbox">👤 {{ usuario }} · <a href="/logout">sair</a></div>
 </header>
@@ -82,13 +92,21 @@
 <div class="tabs" id="anoTabs"></div>
 <div class="mes-nav" id="mesNav"></div>
 
-<div class="wrap">
-  <table id="tbl">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <label class="muted" style="display:flex;align-items:center;gap:6px">Moeda:
+      <select id="selMoeda" onchange="saveMoeda()">
+        <option value="BRL">R$ Real</option>
+        <option value="USD">US$ Dólar</option>
+      </select>
+    </label>
+    <span class="muted" style="font-size:11px">Arraste a borda direita de cada coluna para redimensionar</span>
+  </div>
+  <table id="tbl" style="table-layout:fixed">
     <thead><tr>
-      <th style="cursor:pointer;user-select:none" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
-      <th title="Marque os fundos de caixa/DI que geram renda">Caixa/DI</th>
-      <th>Valor base</th><th>Aporte (+)</th><th>Resgate (−)</th>
-      <th>Proventos</th><th>Valor final</th><th>Rent. mês</th><th>Peso</th><th></th>
+      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
+      <th style="text-align:center">Classe</th>
+      <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
+      <th style="text-align:center">Proventos</th><th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -123,7 +141,9 @@
 
 <script>
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-const BRL = v => (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const CLASSES_RENT = ['','Caixa','Renda Fixa','Tesouro Direto','Ações','FII','FII Infra'];
+let MOEDA = 'BRL';
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => v==null ? '—' : (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
 function smartNum(s){
   s = String(s).replace(/[^\d.,-]/g,'');
@@ -169,9 +189,13 @@ async function load(){
   const r = await fetch('/api/carteira/'+CID+'/rent');
   DATA = await r.json();
   EDIT = DATA.editavel;
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  document.getElementById('selMoeda').value = MOEDA;
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
     `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
   document.getElementById('addbar').style.display = EDIT ? '' : 'none';
+  document.getElementById('btnDelCart').style.display = EDIT ? '' : 'none';
+  document.getElementById('btnRenomear').style.display = EDIT ? '' : 'none';
   if(DATA.anos.length && !DATA.anos.includes(ANO)) ANO = DATA.anos[DATA.anos.length-1];
   render();
 }
@@ -213,7 +237,7 @@ function renderMes(){
       Nenhum ativo ainda — adicione o primeiro abaixo (ex.: Fundo DI, Ações, IPCA+...).</td></tr>`;
     return;
   }
-  const caixaMap = {}; DATA.ativos.forEach(a=>caixaMap[a.id]=a.is_caixa);
+  const classeMap = {}; DATA.ativos.forEach(a=>classeMap[a.id]=a.classe||'');
   let linhas = md ? md.linhas.filter(l=>l.mostrar!==false)
                   : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
   if(ORD_AZ) linhas = [...linhas].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')*ORD_AZ);
@@ -222,19 +246,23 @@ function renderMes(){
       Nenhum ativo ativo neste mês.</td></tr>`;
     return;
   }
+  const moedaHint = MOEDA==='USD' ? 'US$ 0,00' : 'R$ 0,00';
   tb.innerHTML = linhas.map(l=>{
     const primeiraVez = !l.tem_mov && l.base===0;
     return `<tr>
       <td><span class="tick">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
-      <td style="text-align:center"><input type="checkbox" ${caixaMap[l.ativo_id]?'checked':''} ${EDIT?'':'disabled'}
-        title="conta na Geração de Caixa" onchange="toggleCaixa(${l.ativo_id},this.checked)"></td>
+      <td style="text-align:center">
+        <select ${EDIT?'':'disabled'} onchange="setClasse(${l.ativo_id},this.value)">
+          ${CLASSES_RENT.map(c=>`<option value="${c}" ${classeMap[l.ativo_id]===c?'selected':''}>${c||'—'}</option>`).join('')}
+        </select>
+      </td>
       <td>${primeiraVez && EDIT
-        ? `<input value="" placeholder="valor inicial" onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_base',this.value)">`
+        ? `<input value="" placeholder="${MOEDA==='USD'?'US$ inicial':'R$ inicial'}" onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_base',this.value)">`
         : `<span class="muted">${BRL(l.base)}</span>`}</td>
-      <td><input value="${l.aporte||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aporte',this.value)"></td>
-      <td><input value="${l.resgate||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
-      <td><input value="${l.proventos||''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
-      <td><input value="${l.tem_mov?l.final:''}" placeholder="0" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
+      <td><input value="${l.aporte?BRL(l.aporte):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aporte',this.value)"></td>
+      <td><input value="${l.resgate?BRL(l.resgate):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
+      <td><input value="${l.proventos?BRL(l.proventos):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
+      <td><input value="${l.tem_mov?BRL(l.final):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
       <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
       <td class="muted">${(l.peso*100).toFixed(1)}%</td>
       <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>
@@ -362,9 +390,9 @@ async function delAtivo(id){
   await fetch('/api/rent/ativos/'+id,{method:'DELETE'});
   load();
 }
-async function toggleCaixa(id, val){
+async function setClasse(id, classe){
   await fetch('/api/rent/ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({is_caixa: val?1:0})});
+    body: JSON.stringify({classe})});
   load();
 }
 async function saveRenda(){
@@ -373,8 +401,66 @@ async function saveRenda(){
     body: JSON.stringify({renda_ref: v})});
   load();
 }
+async function saveMoeda(){
+  MOEDA = document.getElementById('selMoeda').value;
+  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({moeda: MOEDA})});
+  load();
+}
+async function renomearCarteira(){
+  if(!CID || !DATA.carteira) return;
+  const novo = prompt('Novo nome da carteira:', DATA.carteira.nome);
+  if(!novo || !novo.trim()) return;
+  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: novo.trim()})});
+  carregarCarteiras();
+}
+async function novaCarteira(){
+  const nome = prompt('Nome da nova carteira (ex.: "Carteira do Rafael", "Aposentadoria"):');
+  if(!nome) return;
+  const r = await fetch('/api/carteiras',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome})});
+  const d = await r.json();
+  if(d.id){ CID = d.id; }
+  carregarCarteiras();
+}
+async function deletarCarteira(){
+  const nome = DATA.carteira ? DATA.carteira.nome : 'esta carteira';
+  if(!confirm(`Tem certeza que deseja EXCLUIR a carteira "${nome}" e todos os seus ativos?\n\nEssa ação não pode ser desfeita.`)) return;
+  const r = await fetch('/api/carteira/'+CID, {method:'DELETE'});
+  if(r.ok){ CID = null; carregarCarteiras(); }
+  else { alert('Erro ao excluir carteira.'); }
+}
+
+// Colunas redimensionáveis (como no Excel) — largura salva no navegador
+function makeResizable(){
+  const table = document.getElementById('tbl');
+  const saved = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
+  table.querySelectorAll('thead th').forEach((th,idx)=>{
+    if(saved[idx]) th.style.width = saved[idx]+'px';
+    if(th.querySelector('.resizer')) return;
+    const r = document.createElement('span');
+    r.className = 'resizer';
+    th.appendChild(r);
+    r.addEventListener('mousedown', e=>{
+      e.preventDefault();
+      const startX = e.pageX, startW = th.offsetWidth;
+      function onMove(ev){ th.style.width = Math.max(40, startW+(ev.pageX-startX))+'px'; }
+      function onUp(){
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const widths = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
+        widths[idx] = th.offsetWidth;
+        localStorage.setItem('rentColWidths', JSON.stringify(widths));
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
 
 carregarCarteiras();
+makeResizable();
 </script>
 </body>
 </html>

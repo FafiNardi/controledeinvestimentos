@@ -142,7 +142,7 @@
   <div class="stats" style="padding:0 0 10px">
     <div class="stat"><div class="k">Média mensal (ger. caixa + prov.)</div><div class="v" id="indMedia">—</div></div>
     <div class="stat"><div class="k">Renda de referência (IBGE)
-      <input id="rendaRef" style="width:90px;margin-left:6px" onchange="saveRenda()"></div>
+      <input id="rendaRef" style="width:100px;margin-left:6px" onfocus="this.select()" onchange="saveRenda()"></div>
       <div class="v" id="indPct">—</div></div>
     <div class="stat"><div class="k">Total no ano</div><div class="v" id="indTotal">—</div></div>
   </div>
@@ -173,6 +173,19 @@ let DATA = null, CID = null, EDIT = false;
 let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
 let ORD_AZ = 0;   // 0 = ordem original, 1 = A-Z, -1 = Z-A
 let charts = {};
+let ULTIMO_MES_POR_ANO = {};   // lembra o último mês visto em cada ano
+
+function irParaAno(a){
+  ULTIMO_MES_POR_ANO[ANO] = MES;   // guarda onde eu estava antes de trocar de ano
+  ANO = a;
+  MES = ULTIMO_MES_POR_ANO[a] !== undefined ? ULTIMO_MES_POR_ANO[a] : MES;
+  render();
+}
+function irParaMes(m){
+  MES = m;
+  ULTIMO_MES_POR_ANO[ANO] = m;
+  render();
+}
 
 function toggleOrdem(){ ORD_AZ = ORD_AZ===1 ? -1 : ORD_AZ===-1 ? 0 : 1;
   document.getElementById('ordArr').textContent = ORD_AZ===1?'▲':ORD_AZ===-1?'▼':'';
@@ -224,12 +237,12 @@ function render(){
   const min = Math.min(...base), max = Math.max(...base);
   const anos = []; for(let a=min; a<=max; a++) anos.push(a);
   document.getElementById('anoTabs').innerHTML = anos.map(a=>
-    `<span class="tab ${a===ANO?'on':''}" onclick="ANO=${a};render()">${a}</span>`).join('') +
+    `<span class="tab ${a===ANO?'on':''}" onclick="irParaAno(${a})">${a}</span>`).join('') +
     (EDIT?`<span class="tab" onclick="novoAno()">+ ano</span>`:'');
   document.getElementById('mesNav').innerHTML = MESES.map((n,i)=>{
     const md = mesData(ANO,i+1);
     return `<span class="mes-btn ${i+1===MES?'on':''} ${md&&md.tem_dado?'tem':''}"
-      onclick="MES=${i+1};render()">${n}</span>`;
+      onclick="irParaMes(${i+1})">${n}</span>`;
   }).join('');
   document.getElementById('anoLabel').textContent = ANO;
   renderMes(); renderStats(); renderResumo(); renderCharts();
@@ -239,7 +252,9 @@ async function novoAno(){
   if(!a || !/^\d{4}$/.test(a.trim())) return;
   await fetch('/api/carteira/'+CID+'/rent/anos',{method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({ano:parseInt(a.trim())})});
+  ULTIMO_MES_POR_ANO[ANO] = MES;
   ANO = parseInt(a.trim()); MES = 1;
+  ULTIMO_MES_POR_ANO[ANO] = 1;
   load();
 }
 
@@ -387,7 +402,7 @@ function renderCharts(){
   document.getElementById('indTotal').textContent = BRL(totalGer);
   document.getElementById('indPct').textContent = rref ? (media/rref*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%' : '—';
   const ri = document.getElementById('rendaRef');
-  if(document.activeElement!==ri){ ri.value = rref; }
+  if(document.activeElement!==ri){ ri.value = rref ? BRL(rref) : ''; }
   ri.disabled = !EDIT;
 }
 

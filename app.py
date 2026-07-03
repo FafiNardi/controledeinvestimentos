@@ -487,6 +487,17 @@ def rent_compute(cid):
     # série completa do primeiro ao último mês lançado
     a0, m0 = periodos[0]
     a1, m1 = periodos[-1]
+    # estende o fim da série até hoje e até o último ano adicionado manualmente,
+    # para os ativos continuarem "copiando" o saldo nos anos seguintes mesmo
+    # sem nenhum lançamento novo em nenhum ativo da carteira
+    c = db.session.get(Carteira, cid)
+    hoje = datetime.now()
+    candidatos_fim = [(a1, m1), (hoje.year, hoje.month)]
+    if c and c.anos_json:
+        anos_extra = [int(x) for x in c.anos_json.split(",") if x.strip().isdigit()]
+        if anos_extra:
+            candidatos_fim.append((max(anos_extra), 12))
+    a1, m1 = max(candidatos_fim)
     serie = []
     y, mth = a0, m0
     while (y, mth) <= (a1, m1):

@@ -35,6 +35,15 @@
   .nav-btn:hover{filter:brightness(1.1)}
   .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
   .userbox a{color:var(--accent);text-decoration:none}
+  .moeda-switch{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;font-weight:600}
+  .switch{position:relative;display:inline-block;width:38px;height:20px;flex-shrink:0}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+          background:var(--panel2);border:1px solid var(--line);transition:.2s;border-radius:20px}
+  .slider:before{position:absolute;content:"";height:14px;width:14px;left:2px;bottom:2px;
+                 background:var(--muted);transition:.2s;border-radius:50%}
+  .switch input:checked + .slider{background:var(--blue);border-color:var(--blue)}
+  .switch input:checked + .slider:before{transform:translateX(18px);background:#fff}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
   .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:wrap}
@@ -87,6 +96,14 @@
     <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
   </label>
   <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
+  <div class="moeda-switch">
+    <span>R$</span>
+    <label class="switch">
+      <input type="checkbox" id="chkMoeda" onchange="saveMoeda()">
+      <span class="slider"></span>
+    </label>
+    <span>US$</span>
+  </div>
   <button class="nav-btn on" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
   <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
@@ -102,14 +119,6 @@
 <div class="tabs" id="anoTabs"></div>
 <div class="mes-nav" id="mesNav"></div>
 
-  <div style="display:flex;align-items:center;margin-bottom:10px">
-    <label class="muted" style="display:flex;align-items:center;gap:6px;margin-left:auto">Moeda:
-      <select id="selMoeda" onchange="saveMoeda()">
-        <option value="BRL">R$ Real</option>
-        <option value="USD">US$ Dólar</option>
-      </select>
-    </label>
-  </div>
   <table id="tbl" style="table-layout:fixed">
     <thead><tr>
       <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
@@ -218,7 +227,7 @@ async function load(){
   DATA = await r.json();
   EDIT = DATA.editavel;
   MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
-  document.getElementById('selMoeda').value = MOEDA;
+  document.getElementById('chkMoeda').checked = (MOEDA === 'USD');
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
     `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
   document.getElementById('addbar').style.display = EDIT ? '' : 'none';
@@ -353,26 +362,34 @@ function mkChart(id, cfg){
 }
 const GRID = {color:'rgba(255,255,255,.06)'};
 const TICKS = {color:'#8a9bb0'};
+const fmtPctChart = v => (v==null?0:v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+const fmtMoedaChart = v => BRL(v==null?0:v);
 
 function renderCharts(){
   // 1. retorno mês a mês do ano
   const rets = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
   mkChart('chRet',{type:'bar',data:{labels:MESES,datasets:[{data:rets,
     backgroundColor:rets.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)')}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
-      y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+    options:{plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:TICKS},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
   // 2. dividendos do ano
   const divs = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m?m.dividendos:0;});
   mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divs,backgroundColor:'rgba(45,212,191,.7)'}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:TICKS},
-      y:{grid:GRID,ticks:{...TICKS,callback:v=>'R$'+v.toLocaleString('pt-BR')}}}}});
+    options:{plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:TICKS},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
   // 3. acumulado histórico
   const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
   mkChart('chAcum',{type:'line',data:{labels:keys.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
     datasets:[{data:keys.map(k=>DATA.meses[k].acumulado*100),borderColor:'#2dd4bf',
       backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
-    options:{plugins:{legend:{display:false}},scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
-      y:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}}}}});
+    options:{plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
   // 4. peso dos ativos (mês selecionado ou último com dado)
   let md = mesData(ANO,MES);
   if(!md || !md.tem_dado){
@@ -382,17 +399,19 @@ function renderCharts(){
   const pesos = md ? md.linhas.filter(l=>l.final>0).sort((a,b)=>b.peso-a.peso) : [];
   mkChart('chPeso',{type:'bar',data:{labels:pesos.map(l=>l.nome),
     datasets:[{data:pesos.map(l=>l.peso*100),backgroundColor:'rgba(59,130,246,.7)'}]},
-    options:{indexAxis:'y',plugins:{legend:{display:false}},
-      scales:{x:{grid:GRID,ticks:{...TICKS,callback:v=>v+'%'}},y:{grid:GRID,ticks:TICKS}}}});
+    options:{indexAxis:'y',plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.x)}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}},y:{grid:GRID,ticks:TICKS}}}});
   // 5. geração de caixa + proventos mês a mês (barras empilhadas)
   const gcx = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
   const gdv = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.dividendos:null;});
   mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
     {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
     {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},
-    options:{plugins:{legend:{labels:{color:'#8a9bb0'}}},
+    options:{plugins:{legend:{labels:{color:'#8a9bb0'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
-        y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:v=>'R$'+v.toLocaleString('pt-BR')}}}}});
+        y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
   // indicadores de renda passiva
   const mesesComDado = MESES.map((_,i)=>mesData(ANO,i+1)).filter(m=>m&&m.tem_dado);
   const totalGer = mesesComDado.reduce((s,m)=>s+m.geracao_total,0);
@@ -436,7 +455,7 @@ async function saveRenda(){
   load();
 }
 async function saveMoeda(){
-  const nova = document.getElementById('selMoeda').value;
+  const nova = document.getElementById('chkMoeda').checked ? 'USD' : 'BRL';
   const mapa = nova==='USD' ? CLASSE_BRL_TO_USD : CLASSE_USD_TO_BRL;
   const traducoes = (DATA.ativos||[])
     .filter(a => mapa[a.classe])

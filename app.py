@@ -92,6 +92,8 @@ class RentAtivo(db.Model):
     ordem = db.Column(db.Integer, default=0)
     is_caixa = db.Column(db.Integer, default=0)   # legado; substituído por classe == "Caixa"
     classe = db.Column(db.String(30), default="")  # Caixa, Renda Fixa, Tesouro Direto, Ações, FII, FII Infra
+    inicio_ano = db.Column(db.Integer)   # ano/mês em que o ativo foi criado; None = sem restrição (legado)
+    inicio_mes = db.Column(db.Integer)   # não aparece em períodos anteriores a isso
     movs = db.relationship("RentMov", backref="ativo", cascade="all, delete-orphan")
 
 
@@ -460,11 +462,13 @@ def api_refresh(cid):
 def rent_compute(cid):
     """Calcula toda a série histórica de rentabilidade de uma carteira.
 
-    Fórmulas da planilha:
-      rent do ativo  = ValorFinal / (Base + Aporte - Resgate - Proventos) - 1
-      posição encerrada (final=0): rent = Resgate / Base - 1
-      retorno carteira = mesmo cálculo sobre os totais (Patrimônio)
-      acumulado = capitalização composta dos retornos mensais
+    Retorno do mês = (ValorFinal + Resgate + Proventos) / (Base + Aporte) - 1
+    Isso trata resgate e proventos como dinheiro que saiu do fundo (positivo
+    para o retorno quando há lucro), evitando o bug de mostrar -100% num
+    resgate lucrativo que zera a posição.
+    Acumulado = capitalização composta dos retornos mensais.
+    Um ativo só aparece a partir do mês em que foi criado (inicio_ano/mes);
+    ativos antigos sem essa marcação continuam aparecendo em toda a série.
     """
     ativos = RentAtivo.query.filter_by(carteira_id=cid) \
         .order_by(RentAtivo.ordem, RentAtivo.id).all()
@@ -502,6 +506,9 @@ def rent_compute(cid):
         geracao_caixa = 0.0   # rendimento puro dos fundos caixa/DI no mês
         tem_dado = False
         for a in ativos:
+            # ativo ainda não existia neste período (criado depois) -> ignora
+            if a.inicio_ano and (y, mth) < (a.inicio_ano, a.inicio_mes or 1):
+                continue
             mv = movs.get((a.id, y, mth))
             base = ultimo_final[a.id]
             if base is None:
@@ -515,12 +522,9 @@ def rent_compute(cid):
             if final is None:
                 final = base if base else 0
             rent = None
-            if final == 0 and base:
-                rent = (resgate / base) - 1 if resgate else None
-            else:
-                denom = base + aporte - resgate - prov
-                if denom:
-                    rent = (final / denom) - 1
+            denom = base + aporte
+            if denom:
+                rent = (final + resgate + prov) / denom - 1
             # decide se o ativo aparece na lista deste mês:
             #  - aparece se teve lançamento, se ainda tem saldo, ou se nunca começou
             #  - some se foi encerrado (saldo 0, sem lançamento, mas já operou antes)
@@ -543,9 +547,9 @@ def rent_compute(cid):
             ultimo_final[a.id] = final
         # retorno da carteira no mês
         rent_cart = None
-        denom = tot["base"] + tot["aporte"] - tot["resgate"] - tot["proventos"]
+        denom = tot["base"] + tot["aporte"]
         if denom:
-            rent_cart = (tot["final"] / denom) - 1
+            rent_cart = (tot["final"] + tot["resgate"] + tot["proventos"]) / denom - 1
         if rent_cart is not None and tem_dado:
             acum *= (1 + rent_cart)
         for ln in linhas:
@@ -606,12 +610,18 @@ def api_rent_add_ano(cid):
 def api_rent_add_ativo(cid):
     c = get_carteira_or_404(cid)
     require_owner(c)
-    nome = (request.get_json(force=True).get("nome") or "").strip()
+    d = request.get_json(force=True)
+    nome = (d.get("nome") or "").strip()
     if not nome:
         return jsonify({"erro": "informe um nome"}), 400
     maxord = db.session.query(db.func.coalesce(db.func.max(RentAtivo.ordem), 0)) \
         .filter_by(carteira_id=cid).scalar()
-    a = RentAtivo(carteira_id=cid, nome=nome, ordem=maxord + 1)
+    # ativo só aparece a partir do mês/ano em que foi criado (não "vaza" para anos anteriores)
+    ano = d.get("ano")
+    mes = d.get("mes")
+    a = RentAtivo(carteira_id=cid, nome=nome, ordem=maxord + 1,
+                  inicio_ano=int(ano) if ano else None,
+                  inicio_mes=int(mes) if mes else None)
     db.session.add(a)
     db.session.commit()
     return jsonify({"ok": True, "id": a.id})
@@ -677,6 +687,8 @@ def ensure_schema():
     add("carteira", "moeda", "moeda VARCHAR(3) DEFAULT 'BRL'")
     add("rent_ativo", "is_caixa", "is_caixa INTEGER DEFAULT 0")
     add("rent_ativo", "classe", "classe VARCHAR(30) DEFAULT ''")
+    add("rent_ativo", "inicio_ano", "inicio_ano INTEGER")
+    add("rent_ativo", "inicio_mes", "inicio_mes INTEGER")
     if insp.has_table("rent_ativo"):
         cols = [c["name"] for c in insp.get_columns("rent_ativo")]
         if "classe" in cols and "is_caixa" in cols:

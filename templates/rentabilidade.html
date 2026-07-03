@@ -381,7 +381,7 @@ async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();
   if(!nome) return;
   await fetch('/api/carteira/'+CID+'/rent/ativos',{method:'POST',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome})});
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome, ano:ANO, mes:MES})});
   document.getElementById('novoAtivo').value='';
   load();
 }

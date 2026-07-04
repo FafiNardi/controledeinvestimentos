@@ -35,15 +35,12 @@
   .nav-btn:hover{filter:brightness(1.1)}
   .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
   .userbox a{color:var(--accent);text-decoration:none}
-  .moeda-switch{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;font-weight:600}
-  .switch{position:relative;display:inline-block;width:38px;height:20px;flex-shrink:0}
-  .switch input{opacity:0;width:0;height:0}
-  .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
-          background:var(--panel2);border:1px solid var(--line);transition:.2s;border-radius:20px}
-  .slider:before{position:absolute;content:"";height:14px;width:14px;left:2px;bottom:2px;
-                 background:var(--muted);transition:.2s;border-radius:50%}
-  .switch input:checked + .slider{background:var(--blue);border-color:var(--blue)}
-  .switch input:checked + .slider:before{transform:translateX(18px);background:#fff}
+  .moeda-switch{display:flex;border:1px solid var(--line);border-radius:20px;overflow:hidden}
+  .moeda-opt{background:var(--panel2);color:var(--muted);border:0;border-radius:0;
+             padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
+  .moeda-opt:first-child{border-right:1px solid var(--line)}
+  .moeda-opt.on{background:var(--blue);color:#fff}
+  .moeda-opt:hover{filter:brightness(1.1)}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
   .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:wrap}
@@ -97,12 +94,8 @@
   </label>
   <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
   <div class="moeda-switch">
-    <span>R$</span>
-    <label class="switch">
-      <input type="checkbox" id="chkMoeda" onchange="saveMoeda()">
-      <span class="slider"></span>
-    </label>
-    <span>US$</span>
+    <button type="button" id="btnMoedaBRL" class="moeda-opt" onclick="setMoeda('BRL')">R$</button>
+    <button type="button" id="btnMoedaUSD" class="moeda-opt" onclick="setMoeda('USD')">US$</button>
   </div>
   <button class="nav-btn on" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
   <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
@@ -119,6 +112,13 @@
 <div class="tabs" id="anoTabs"></div>
 <div class="mes-nav" id="mesNav"></div>
 
+  <div class="tabs" style="padding-top:0">
+    <label class="muted" style="display:flex;align-items:center;gap:6px">Classe:
+      <select id="filtroClasseRent" onchange="setFiltroClasse(this.value)">
+        <option value="">Todas</option>
+      </select>
+    </label>
+  </div>
   <table id="tbl" style="table-layout:fixed">
     <thead><tr>
       <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
@@ -140,10 +140,29 @@
 
 <div class="charts">
   <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><canvas id="chRet"></canvas></div>
-  <div class="chartbox"><h3>Dividendos recebidos no ano</h3><canvas id="chDiv"></canvas></div>
   <div class="chartbox"><h3>Retorno acumulado (histórico completo)</h3><canvas id="chAcum"></canvas></div>
+
   <div class="chartbox"><h3>Peso dos ativos em carteira</h3><canvas id="chPeso"></canvas></div>
-  <div class="chartbox full"><h3>Geração de Caixa + Proventos (mês a mês)</h3><canvas id="chGer" style="max-height:260px"></canvas></div>
+  <div class="chartbox">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Retorno acumulado (histórico completo de todos os meses da carteira)</span>
+      <select id="selJanela" onchange="renderCharts()" style="font-size:11px;padding:3px 6px">
+        <option value="24">24 meses</option>
+        <option value="36">36 meses</option>
+        <option value="48">48 meses</option>
+        <option value="60">60 meses</option>
+        <option value="72">72 meses</option>
+        <option value="84">84 meses</option>
+        <option value="96">96 meses</option>
+        <option value="108">108 meses</option>
+        <option value="120">120 meses</option>
+      </select>
+    </h3>
+    <canvas id="chAcumJanela"></canvas>
+  </div>
+
+  <div class="chartbox"><h3>Geração de Caixa + Proventos (mês a mês)</h3><canvas id="chGer" style="max-height:260px"></canvas></div>
+  <div class="chartbox"><h3>Dividendos acumulados no ano</h3><canvas id="chDiv"></canvas></div>
 </div>
 
 <div class="wrap">
@@ -183,6 +202,8 @@ let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
 let ORD_AZ = 0;   // 0 = ordem original, 1 = A-Z, -1 = Z-A
 let charts = {};
 let ULTIMO_MES_POR_ANO = {};   // lembra o último mês visto em cada ano
+let FILTRO_CLASSE = '';
+function setFiltroClasse(v){ FILTRO_CLASSE = v; renderMes(); }
 
 function irParaAno(a){
   ULTIMO_MES_POR_ANO[ANO] = MES;   // guarda onde eu estava antes de trocar de ano
@@ -227,7 +248,8 @@ async function load(){
   DATA = await r.json();
   EDIT = DATA.editavel;
   MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
-  document.getElementById('chkMoeda').checked = (MOEDA === 'USD');
+  document.getElementById('btnMoedaBRL').classList.toggle('on', MOEDA !== 'USD');
+  document.getElementById('btnMoedaUSD').classList.toggle('on', MOEDA === 'USD');
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
     `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
   document.getElementById('addbar').style.display = EDIT ? '' : 'none';
@@ -254,7 +276,16 @@ function render(){
       onclick="irParaMes(${i+1})">${n}</span>`;
   }).join('');
   document.getElementById('anoLabel').textContent = ANO;
+  popularFiltroClasseRent();
   renderMes(); renderStats(); renderResumo(); renderCharts();
+}
+function popularFiltroClasseRent(){
+  const sel = document.getElementById('filtroClasseRent');
+  const atual = sel.value;
+  const classes = [...new Set((DATA.ativos||[]).map(a=>a.classe).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  sel.innerHTML = '<option value="">Todas</option>' +
+    classes.map(c=>`<option ${c===atual?'selected':''}>${c}</option>`).join('');
 }
 async function novoAno(){
   const a = prompt('Qual ano deseja adicionar? (ex.: 2017). Todos os anos entre ele e o atual aparecerão.');
@@ -279,10 +310,11 @@ function renderMes(){
   const classeMap = {}; DATA.ativos.forEach(a=>classeMap[a.id]=a.classe||'');
   let linhas = md ? md.linhas.filter(l=>l.mostrar!==false)
                   : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  if(FILTRO_CLASSE) linhas = linhas.filter(l => classeMap[l.ativo_id] === FILTRO_CLASSE);
   if(ORD_AZ) linhas = [...linhas].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')*ORD_AZ);
   if(!linhas.length){
     tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">
-      Nenhum ativo ativo neste mês.</td></tr>`;
+      Nenhum ativo ${FILTRO_CLASSE ? 'dessa classe' : 'ativo'} neste mês.</td></tr>`;
     return;
   }
   const moedaHint = MOEDA==='USD' ? 'US$ 0,00' : 'R$ 0,00';
@@ -374,18 +406,29 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:TICKS},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
-  // 2. dividendos do ano
-  const divs = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m?m.dividendos:0;});
-  mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divs,backgroundColor:'rgba(45,212,191,.7)'}]},
+  // 2. dividendos ACUMULADOS no ano (soma corrida mês a mês, zera a cada ano)
+  let acumDiv = 0;
+  const divsAcum = MESES.map((_,i)=>{const m=mesData(ANO,i+1); acumDiv += (m?m.dividendos:0); return acumDiv;});
+  mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divsAcum,backgroundColor:'rgba(45,212,191,.7)'}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:TICKS},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
-  // 3. acumulado histórico
+  // 3. acumulado histórico (linha completa, sem filtro)
   const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
   mkChart('chAcum',{type:'line',data:{labels:keys.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
     datasets:[{data:keys.map(k=>DATA.meses[k].acumulado*100),borderColor:'#2dd4bf',
       backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
+    options:{plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
+  // 3b. acumulado histórico com janela de meses selecionável (24 a 120)
+  const janela = parseInt(document.getElementById('selJanela').value) || 24;
+  const keysJanela = keys.slice(-janela);
+  mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
+    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:0,tension:.2}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
@@ -454,8 +497,8 @@ async function saveRenda(){
     body: JSON.stringify({renda_ref: v})});
   load();
 }
-async function saveMoeda(){
-  const nova = document.getElementById('chkMoeda').checked ? 'USD' : 'BRL';
+async function setMoeda(nova){
+  if(nova === MOEDA) return;
   const mapa = nova==='USD' ? CLASSE_BRL_TO_USD : CLASSE_USD_TO_BRL;
   const traducoes = (DATA.ativos||[])
     .filter(a => mapa[a.classe])

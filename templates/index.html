@@ -208,16 +208,24 @@ async function carregarCarteiras(){
     const tag = c.minha ? '' : ' · '+c.dono;
     return `<option value="${c.id}">${c.nome}${tag}${c.minha?'  (minha)':''}</option>`;
   }).join('');
-  // mantém seleção atual ou escolhe a primeira "minha"
+  // mantém seleção atual, senão a última usada (compartilhada com a página de Rentabilidade),
+  // senão a primeira "minha"
   if(!CID || !CARTEIRAS.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = CARTEIRAS.find(c=>c.id===salva);
     const minha = CARTEIRAS.find(c=>c.minha);
-    CID = (minha || CARTEIRAS[0]).id;
+    CID = existeSalva ? salva : (minha || CARTEIRAS[0]).id;
   }
   sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
   await load();
 }
 
-function trocarCarteira(){ CID = parseInt(document.getElementById('selCarteira').value)||null; load(); }
+function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value)||null;
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  load();
+}
 
 async function novaCarteira(){
   const nome = prompt('Nome da nova carteira (ex.: "Carteira do Rafael", "Aposentadoria"):');

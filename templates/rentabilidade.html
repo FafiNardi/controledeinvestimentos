@@ -236,12 +236,23 @@ async function carregarCarteiras(){
   if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
   sel.innerHTML = d.carteiras.map(c=>
     `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
-  const minha = d.carteiras.find(c=>c.minha);
-  CID = (minha || d.carteiras[0]).id;
+  // mantém seleção atual, senão a última usada (compartilhada com a página de Rebalanceamento),
+  // senão a primeira "minha"
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
   sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
   await load();
 }
-function trocarCarteira(){ CID = parseInt(document.getElementById('selCarteira').value); load(); }
+function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  load();
+}
 
 async function load(){
   const r = await fetch('/api/carteira/'+CID+'/rent');

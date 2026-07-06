@@ -170,7 +170,13 @@
 </div>
 
 <script>
-const CLASSES = ["", "Ação", "FII", "FII Infra", "Renda Fixa", "ETF", "BDR", "Cripto"];
+const CLASSES_BRL = ["Ação", "BDR", "Cripto", "ETF", "FII", "FII Infra", "Renda Fixa"]
+  .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+const CLASSES_USD = ["Bond", "Cash", "ETF", "REIT", "Stocks"]
+  .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+const CLASSE_BRL_TO_USD = {"Renda Fixa":"Bond", "FII":"REIT", "Ação":"Stocks", "ETF":"ETF"};
+const CLASSE_USD_TO_BRL = {"Bond":"Renda Fixa", "REIT":"FII", "Stocks":"Ação", "ETF":"ETF"};
+function classesAtuais(){ return ["", ...(MOEDA==='USD'?CLASSES_USD:CLASSES_BRL)]; }
 const SEGMENTOS = ["", "Elétrica", "Bancos", "Fdo. de Inv.", "Fundo de Fundos",
   "Logística", "Construtora", "Celulose", "Renda Fixa", "Shopping", "Imóveis",
   "Tesouro Direto", "Financeira", "Lajes Corp.", "Papel", "Híbrido", "Petróleo",
@@ -191,6 +197,11 @@ function smartNum(s){
 }
 function fillSelect(sel, opts, val){
   sel.innerHTML = opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('');
+}
+function fillSelectClasse(sel, val){
+  const lista = classesAtuais();
+  const opcoes = (!val || lista.includes(val)) ? lista : [...lista, val];
+  fillSelect(sel, opcoes, val);
 }
 
 let STATE = {assets:[]};
@@ -245,6 +256,7 @@ async function load(){
   EDIT = STATE.carteira.editavel;
   MOEDA = STATE.carteira.moeda || 'BRL';
   document.getElementById('selMoeda').value = MOEDA;
+  fillSelectClasse(document.getElementById('newClasse'), '');
   document.getElementById('carteiraIdeal').placeholder = MOEDA==='USD' ? 'US$ 0.00' : 'R$ 0.00';
   document.getElementById('carteiraIdeal').value = STATE.carteira.carteira_ideal ? fmtUS(STATE.carteira.carteira_ideal) : '';
   document.getElementById('carteiraIdeal').disabled = !EDIT;
@@ -339,7 +351,7 @@ function renderRows(){
   dados.forEach(a=>{
     const tr = tb.querySelector(`tr[data-id="${a.id}"]`);
     if(!tr) return;
-    fillSelect(tr.querySelector('[data-classe]'), CLASSES, a.classe);
+    fillSelectClasse(tr.querySelector('[data-classe]'), a.classe);
     fillSelect(tr.querySelector('[data-seg]'), SEGMENTOS, a.segmento);
     if(!EDIT){ tr.querySelector('[data-classe]').disabled=true; tr.querySelector('[data-seg]').disabled=true; }
   });
@@ -383,7 +395,14 @@ async function addAsset(){
 }
 async function saveMoeda(){
   if(!CID) return;
-  MOEDA = document.getElementById('selMoeda').value;
+  const nova = document.getElementById('selMoeda').value;
+  const mapa = nova==='USD' ? CLASSE_BRL_TO_USD : CLASSE_USD_TO_BRL;
+  const traducoes = (STATE.assets||[])
+    .filter(a => mapa[a.classe])
+    .map(a => fetch('/api/assets/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({classe: mapa[a.classe]})}));
+  await Promise.all(traducoes);
+  MOEDA = nova;
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({moeda: MOEDA})});
   load();
@@ -418,7 +437,7 @@ async function refresh(){
   load();
 }
 
-fillSelect(document.getElementById('newClasse'), CLASSES, '');
+fillSelectClasse(document.getElementById('newClasse'), '');
 fillSelect(document.getElementById('newSeg'), SEGMENTOS, '');
 document.querySelectorAll('th.sortable').forEach(th=>
   th.addEventListener('click', ()=> setSort(th.dataset.sort)));

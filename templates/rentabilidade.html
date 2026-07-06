@@ -95,6 +95,11 @@
   .modal-box .stats{padding:0 0 16px}
   .modal-box .chartbox{padding:14px 14px 8px}
   .modal-box table{font-size:12px}
+  .hist-3col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .hist-3col table{width:100%}
+  .hist-3col tbody{display:block;max-height:220px;overflow-y:auto}
+  .hist-3col thead,.hist-3col tbody tr{display:table;width:100%;table-layout:fixed}
+  @media(max-width:700px){.hist-3col{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -236,6 +241,28 @@
       </tr></thead>
       <tbody id="detAtivoRows"></tbody>
     </table>
+
+    <h3 style="color:var(--muted);margin:20px 0 8px">Histórico de operações (todo o período)</h3>
+    <div class="hist-3col">
+      <div>
+        <h4 style="margin:0 0 6px;color:var(--txt);font-size:12.5px">📥 Aportes</h4>
+        <table class="resumo-tab"><thead><tr><th style="text-align:left">Data</th><th>Valor</th></tr></thead>
+          <tbody id="detAportesRows"></tbody>
+        </table>
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px;color:var(--txt);font-size:12.5px">📤 Vendas / Resgates</h4>
+        <table class="resumo-tab"><thead><tr><th style="text-align:left">Data</th><th>Valor</th></tr></thead>
+          <tbody id="detResgatesRows"></tbody>
+        </table>
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px;color:var(--txt);font-size:12.5px">💰 Proventos</h4>
+        <table class="resumo-tab"><thead><tr><th style="text-align:left">Data</th><th>Valor</th></tr></thead>
+          <tbody id="detProventosRows"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -344,6 +371,26 @@ function abrirDetalheAtivo(ativoId){
   document.getElementById('selJanelaDetGrafico').value = '';
   document.getElementById('selJanelaDetTabela').value = '';
   renderizarDetalheJanela();
+  renderizarOperacoesAtivo();
+}
+
+function renderizarOperacoesAtivo(){
+  const mkLista = (campo) => DET_HISTORICO.filter(h=>(h[campo]||0)>0);
+  const mkTabela = (elId, lista, campo) => {
+    const el = document.getElementById(elId);
+    if(!lista.length){
+      el.innerHTML = `<tr><td colspan="2" style="text-align:center;color:var(--muted);padding:10px">Nenhum lançamento.</td></tr>`;
+      return;
+    }
+    const total = lista.reduce((s,h)=>s+(h[campo]||0),0);
+    el.innerHTML = lista.map(h=>{
+      const [a,m] = h.periodo.split('-');
+      return `<tr><td style="text-align:left">${MESES[+m-1]}/${a}</td><td>${BRL(h[campo])}</td></tr>`;
+    }).join('') + `<tr><td style="text-align:left"><b>Total</b></td><td><b>${BRL(total)}</b></td></tr>`;
+  };
+  mkTabela('detAportesRows', mkLista('aporte'), 'aporte');
+  mkTabela('detResgatesRows', mkLista('resgate'), 'resgate');
+  mkTabela('detProventosRows', mkLista('proventos'), 'proventos');
 }
 
 function mudarJanelaDetalhe(v){

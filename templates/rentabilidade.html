@@ -194,8 +194,41 @@
       <button class="ghost" onclick="fecharDetalheAtivo()">✕ Fechar</button>
     </div>
     <div class="stats" id="detAtivoStats"></div>
-    <div class="chartbox"><h3>Rentabilidade acumulada do ativo</h3><canvas id="chDetAtivo"></canvas></div>
-    <h3 style="color:var(--muted);margin:20px 0 8px">Histórico mensal completo</h3>
+    <div class="chartbox">
+      <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>Rentabilidade acumulada do ativo</span>
+        <select id="selJanelaDetGrafico" onchange="mudarJanelaDetalhe(this.value)" style="font-size:11px;padding:3px 6px">
+          <option value="">Tudo</option>
+          <option value="12">12 meses</option>
+          <option value="24">24 meses</option>
+          <option value="36">36 meses</option>
+          <option value="48">48 meses</option>
+          <option value="60">60 meses</option>
+          <option value="72">72 meses</option>
+          <option value="84">84 meses</option>
+          <option value="96">96 meses</option>
+          <option value="108">108 meses</option>
+          <option value="120">120 meses</option>
+        </select>
+      </h3>
+      <canvas id="chDetAtivo"></canvas>
+    </div>
+    <h3 style="color:var(--muted);margin:20px 0 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Histórico mensal completo</span>
+      <select id="selJanelaDetTabela" onchange="mudarJanelaDetalhe(this.value)" style="font-size:11px;padding:3px 6px">
+        <option value="">Tudo</option>
+        <option value="12">12 meses</option>
+        <option value="24">24 meses</option>
+        <option value="36">36 meses</option>
+        <option value="48">48 meses</option>
+        <option value="60">60 meses</option>
+        <option value="72">72 meses</option>
+        <option value="84">84 meses</option>
+        <option value="96">96 meses</option>
+        <option value="108">108 meses</option>
+        <option value="120">120 meses</option>
+      </select>
+    </h3>
     <table class="resumo-tab">
       <thead><tr>
         <th style="text-align:left">Período</th><th>Base</th><th>Aporte</th><th>Resgate</th>
@@ -260,6 +293,17 @@ async function editarNome(id){
   load();
 }
 
+let DET_HISTORICO = [];   // histórico completo do ativo atualmente aberto no modal
+let DET_JANELA = '';      // '' = tudo, ou nº de meses (12 a 120)
+
+function dividendoNoPeriodo(fatia){
+  if(!fatia.length) return 0;
+  const totalDiv = fatia.reduce((s,h)=>s+(h.proventos||0),0);
+  const totalAportes = fatia.reduce((s,h)=>s+(h.aporte||0),0);
+  const investido = fatia[0].base + totalAportes;
+  return investido ? (totalDiv/investido*100) : 0;
+}
+
 function abrirDetalheAtivo(ativoId){
   const ativo = (DATA.ativos||[]).find(a=>a.id===ativoId);
   if(!ativo) return;
@@ -284,14 +328,33 @@ function abrirDetalheAtivo(ativoId){
   const totalInvestido = (primeiraBase||0) + totalAportes;
   const pctDividendo = totalInvestido ? (totalDividendos/totalInvestido*100) : 0;
   const rentTotal = acum-1;
+  const pctDividendo12 = dividendoNoPeriodo(historico.slice(-12));
 
   document.getElementById('detAtivoNome').textContent = '🔎 ' + ativo.nome;
   document.getElementById('detAtivoStats').innerHTML = `
+    <div class="stat"><div class="k">% Dividendo (12 meses)</div><div class="v" style="color:var(--accent)">${pctDividendo12.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>
     <div class="stat"><div class="k">Rentabilidade acumulada</div><div class="v ${rentTotal>=0?'pos':'neg'}">${historico.length?PCT(rentTotal):'—'}</div></div>
     <div class="stat"><div class="k">Total investido</div><div class="v">${BRL(totalInvestido)}</div></div>
     <div class="stat"><div class="k">Total em dividendos</div><div class="v">${BRL(totalDividendos)}</div></div>
     <div class="stat"><div class="k">% dividendo s/ investido</div><div class="v" style="color:var(--accent)">${pctDividendo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>
   `;
+
+  DET_HISTORICO = historico;
+  DET_JANELA = '';
+  document.getElementById('selJanelaDetGrafico').value = '';
+  document.getElementById('selJanelaDetTabela').value = '';
+  renderizarDetalheJanela();
+}
+
+function mudarJanelaDetalhe(v){
+  DET_JANELA = v;
+  document.getElementById('selJanelaDetGrafico').value = v;
+  document.getElementById('selJanelaDetTabela').value = v;
+  renderizarDetalheJanela();
+}
+
+function renderizarDetalheJanela(){
+  const historico = DET_JANELA ? DET_HISTORICO.slice(-parseInt(DET_JANELA)) : DET_HISTORICO;
 
   const labels = historico.map(h=>{const[a,m]=h.periodo.split('-');return MESES[+m-1]+'/'+a.slice(2);});
   if(charts['chDetAtivo']) charts['chDetAtivo'].destroy();

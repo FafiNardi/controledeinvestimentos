@@ -120,10 +120,12 @@ def load_user(uid):
 # Cotações (Yahoo Finance + Fundamentus)
 # --------------------------------------------------------------------------- #
 
-def yahoo_symbol(ticker: str) -> str:
+def yahoo_symbol(ticker: str, moeda: str = "BRL") -> str:
     t = ticker.strip().upper()
     if "." in t or "-" in t:
         return t
+    if moeda == "USD":
+        return t  # ativos dos EUA (NYSE/NASDAQ) não usam sufixo no Yahoo Finance
     return t + ".SA"
 
 
@@ -142,8 +144,8 @@ def fetch_fundamentus_vp(ticker: str):
     return None
 
 
-def fetch_quote(ticker: str) -> dict:
-    symbol = yahoo_symbol(ticker)
+def fetch_quote(ticker: str, moeda: str = "BRL") -> dict:
+    symbol = yahoo_symbol(ticker, moeda)
     out = {"preco": None, "vpa": None, "pvp": None, "dy": None, "erro": None}
     try:
         tk = yf.Ticker(symbol)
@@ -170,7 +172,7 @@ def fetch_quote(ticker: str) -> dict:
             preco = info.get("currentPrice") or info.get("regularMarketPrice")
         vpa = info.get("bookValue")
         pvp = info.get("priceToBook")
-        if not vpa and ticker.strip().upper().endswith("11"):
+        if not vpa and moeda != "USD" and ticker.strip().upper().endswith("11"):
             vpa = fetch_fundamentus_vp(ticker)
         if preco and vpa:
             pvp = preco / vpa
@@ -394,7 +396,7 @@ def api_add_asset(cid):
     db.session.add(a)
     db.session.commit()
     if not a.manual:
-        q = fetch_quote(ticker)
+        q = fetch_quote(ticker, c.moeda or "BRL")
         if q["preco"]:
             a.preco, a.vpa, a.pvp, a.dy = q["preco"], q["vpa"] or 0, q["pvp"] or 0, q["dy"] or 0
             a.updated_at = datetime.now().isoformat(timespec="seconds")
@@ -439,11 +441,11 @@ def api_delete_asset(aid):
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
-    get_carteira_or_404(cid)  # qualquer logado pode atualizar cotações (dado público)
+    c = get_carteira_or_404(cid)  # qualquer logado pode atualizar cotações (dado público)
     assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
     resultados = []
     for a in assets:
-        q = fetch_quote(a.ticker)
+        q = fetch_quote(a.ticker, c.moeda or "BRL")
         if q["preco"]:
             a.preco = q["preco"]
             a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)

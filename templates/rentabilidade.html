@@ -151,7 +151,7 @@
 
 <div class="charts">
   <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><canvas id="chRet"></canvas></div>
-  <div class="chartbox"><h3>Retorno acumulado (histórico completo)</h3><canvas id="chAcum"></canvas></div>
+  <div class="chartbox"><h3>Retorno acumulado no ano</h3><canvas id="chAcum"></canvas></div>
 
   <div class="chartbox"><h3>Peso dos ativos em carteira</h3><canvas id="chPeso"></canvas></div>
   <div class="chartbox">
@@ -576,10 +576,21 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:TICKS},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
-  // 3. acumulado histórico (linha completa, sem filtro)
+  // 3. acumulado NO ANO selecionado (reseta em 0% em janeiro daquele ano;
+  // o histórico completo de todos os anos já aparece no gráfico com janela abaixo)
   const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
-  mkChart('chAcum',{type:'line',data:{labels:keys.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
-    datasets:[{data:keys.map(k=>DATA.meses[k].acumulado*100),borderColor:'#2dd4bf',
+  let acumAno = 1;
+  const keysAno = [], valoresAno = [];
+  MESES.forEach((nomeMes,i)=>{
+    const m = mesData(ANO,i+1);
+    if(m && m.tem_dado && m.rent!=null){
+      acumAno *= (1+m.rent);
+      keysAno.push(nomeMes);
+      valoresAno.push((acumAno-1)*100);
+    }
+  });
+  mkChart('chAcum',{type:'line',data:{labels:keysAno,
+    datasets:[{data:valoresAno,borderColor:'#2dd4bf',
       backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},

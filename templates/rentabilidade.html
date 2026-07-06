@@ -470,8 +470,18 @@ function renderMes(){
     return;
   }
   const classeMap = {}; DATA.ativos.forEach(a=>classeMap[a.id]=a.classe||'');
-  let linhas = md ? md.linhas.filter(l=>l.mostrar!==false)
-                  : DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  // Se este mês não tem dado calculado:
+  //  - carteira totalmente sem lançamentos ainda -> permite lançar o primeiro valor de cada ativo
+  //  - carteira já tem lançamentos em outros meses (este é anterior ao primeiro real) -> nada aqui,
+  //    para não "vazar" os ativos para meses anteriores ao início real deles
+  let linhas;
+  if(md){
+    linhas = md.linhas.filter(l=>l.mostrar!==false);
+  } else if(Object.keys(DATA.meses).length===0){
+    linhas = DATA.ativos.map(a=>({ativo_id:a.id,nome:a.nome,base:0,aporte:0,resgate:0,proventos:0,final:0,rent:null,peso:0,tem_mov:false}));
+  } else {
+    linhas = [];
+  }
   if(FILTRO_CLASSE) linhas = linhas.filter(l => classeMap[l.ativo_id] === FILTRO_CLASSE);
   if(ORD_AZ) linhas = [...linhas].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')*ORD_AZ);
   if(!linhas.length){

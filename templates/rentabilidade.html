@@ -84,6 +84,15 @@
   @media(max-width:900px){.charts{grid-template-columns:1fr}}
   .addbar{display:flex;gap:8px;align-items:center;margin:10px 0 20px}
   .resumo-tab td,.resumo-tab th{font-size:12px}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;
+                 align-items:flex-start;justify-content:center;z-index:100;padding:30px 20px;overflow:auto}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+             padding:22px;max-width:920px;width:100%}
+  .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px}
+  .modal-header h2{margin:0;font-size:17px;color:var(--accent)}
+  .modal-box .stats{padding:0 0 16px}
+  .modal-box .chartbox{padding:14px 14px 8px}
+  .modal-box table{font-size:12px}
 </style>
 </head>
 <body>
@@ -176,6 +185,25 @@
   </div>
 </div>
 
+<div id="modalAtivo" class="modal-overlay" style="display:none" onclick="fecharDetalheSeClicarFora(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="detAtivoNome">🔎 Ativo</h2>
+      <button class="ghost" onclick="fecharDetalheAtivo()">✕ Fechar</button>
+    </div>
+    <div class="stats" id="detAtivoStats"></div>
+    <div class="chartbox"><h3>Rentabilidade acumulada do ativo</h3><canvas id="chDetAtivo"></canvas></div>
+    <h3 style="color:var(--muted);margin:20px 0 8px">Histórico mensal completo</h3>
+    <table class="resumo-tab">
+      <thead><tr>
+        <th style="text-align:left">Período</th><th>Base</th><th>Aporte</th><th>Resgate</th>
+        <th>Proventos</th><th>Final</th><th>Rent. mês</th><th>Acumulado</th>
+      </tr></thead>
+      <tbody id="detAtivoRows"></tbody>
+    </table>
+  </div>
+</div>
+
 <script>
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const CLASSES_RENT_BRL = ['Ações','Caixa','ETF','FII','FII Infra','Fundo de Investimento','Renda Fixa','Tesouro Direto']
@@ -229,6 +257,64 @@ async function editarNome(id){
     body: JSON.stringify({nome})});
   load();
 }
+
+function abrirDetalheAtivo(ativoId){
+  const ativo = (DATA.ativos||[]).find(a=>a.id===ativoId);
+  if(!ativo) return;
+  // exibe o modal ANTES de criar o gráfico, senão o Chart.js mede um contêiner de tamanho zero
+  document.getElementById('modalAtivo').style.display = 'flex';
+  // percorre todo o historico (todos os meses computados) coletando só os períodos
+  // em que este ativo esteve ativo, na ordem cronológica
+  const chaves = Object.keys(DATA.meses).sort();
+  let acum = 1, primeiraBase = null, totalAportes = 0, totalDividendos = 0;
+  const historico = [];
+  chaves.forEach(k=>{
+    const mes = DATA.meses[k];
+    const linha = mes.linhas.find(l=>l.ativo_id===ativoId);
+    if(!linha) return;
+    if(primeiraBase===null) primeiraBase = linha.base;
+    totalAportes += linha.aporte||0;
+    totalDividendos += linha.proventos||0;
+    if(linha.rent!=null) acum *= (1+linha.rent);
+    historico.push({periodo:k, base:linha.base, aporte:linha.aporte, resgate:linha.resgate,
+                     proventos:linha.proventos, final:linha.final, rent:linha.rent, acumulado:acum-1});
+  });
+  const totalInvestido = (primeiraBase||0) + totalAportes;
+  const pctDividendo = totalInvestido ? (totalDividendos/totalInvestido*100) : 0;
+  const rentTotal = acum-1;
+
+  document.getElementById('detAtivoNome').textContent = '🔎 ' + ativo.nome;
+  document.getElementById('detAtivoStats').innerHTML = `
+    <div class="stat"><div class="k">Rentabilidade acumulada</div><div class="v ${rentTotal>=0?'pos':'neg'}">${historico.length?PCT(rentTotal):'—'}</div></div>
+    <div class="stat"><div class="k">Total investido</div><div class="v">${BRL(totalInvestido)}</div></div>
+    <div class="stat"><div class="k">Total em dividendos</div><div class="v">${BRL(totalDividendos)}</div></div>
+    <div class="stat"><div class="k">% dividendo s/ investido</div><div class="v" style="color:var(--accent)">${pctDividendo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>
+  `;
+
+  const labels = historico.map(h=>{const[a,m]=h.periodo.split('-');return MESES[+m-1]+'/'+a.slice(2);});
+  if(charts['chDetAtivo']) charts['chDetAtivo'].destroy();
+  charts['chDetAtivo'] = new Chart(document.getElementById('chDetAtivo'),{
+    type:'line',
+    data:{labels, datasets:[{data:historico.map(h=>h.acumulado*100), borderColor:'#2dd4bf',
+      backgroundColor:'rgba(45,212,191,.12)', fill:true, pointRadius:0, tension:.2}]},
+    options:{plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}}, y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}
+  });
+
+  document.getElementById('detAtivoRows').innerHTML = historico.length ? historico.map(h=>{
+    const [a,m] = h.periodo.split('-');
+    return `<tr>
+      <td style="text-align:left">${MESES[+m-1]}/${a}</td>
+      <td>${BRL(h.base)}</td><td>${BRL(h.aporte)}</td><td>${BRL(h.resgate)}</td>
+      <td>${BRL(h.proventos)}</td><td>${BRL(h.final)}</td>
+      <td class="${h.rent>=0?'pos':'neg'}">${PCT(h.rent)}</td>
+      <td class="${h.acumulado>=0?'pos':'neg'}">${PCT(h.acumulado)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum lançamento ainda.</td></tr>`;
+}
+function fecharDetalheAtivo(){ document.getElementById('modalAtivo').style.display = 'none'; }
+function fecharDetalheSeClicarFora(e){ if(e.target.id==='modalAtivo') fecharDetalheAtivo(); }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharDetalheAtivo(); });
 
 async function carregarCarteiras(){
   const r = await fetch('/api/carteiras'); const d = await r.json();
@@ -336,7 +422,7 @@ function renderMes(){
     const opcoes = listaClasses.includes(classeAtual) || !classeAtual
       ? listaClasses : [...listaClasses, classeAtual];
     return `<tr>
-      <td><span class="tick">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
+      <td><span class="tick" style="cursor:pointer" title="ver detalhes do ativo" onclick="abrirDetalheAtivo(${l.ativo_id})">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
       <td style="text-align:center">
         <select ${EDIT?'':'disabled'} onchange="setClasse(${l.ativo_id},this.value)">
           ${opcoes.map(c=>`<option value="${c}" ${classeAtual===c?'selected':''}>${c||'—'}</option>`).join('')}

@@ -467,8 +467,11 @@ def rent_compute(cid):
     para o retorno quando há lucro), evitando o bug de mostrar -100% num
     resgate lucrativo que zera a posição.
     Acumulado = capitalização composta dos retornos mensais.
-    Um ativo só aparece a partir do mês em que foi criado (inicio_ano/mes);
-    ativos antigos sem essa marcação continuam aparecendo em toda a série.
+    Um ativo só aparece a partir do seu início efetivo: o mais antigo entre
+    (a) o mês em que foi criado (inicio_ano/mes) e (b) o mês do seu primeiro
+    lançamento real. Isso evita tanto "vazar" para antes da criação quanto
+    "vazar" para antes do primeiro lançamento em ativos antigos que não têm
+    inicio_ano preenchido (criados antes desse recurso existir).
     """
     ativos = RentAtivo.query.filter_by(carteira_id=cid) \
         .order_by(RentAtivo.ordem, RentAtivo.id).all()
@@ -479,6 +482,17 @@ def rent_compute(cid):
             movs[(a.id, m.ano, m.mes)] = m
     ativos_out = [{"id": a.id, "nome": a.nome, "classe": a.classe or ""}
                   for a in ativos]
+
+    def inicio_efetivo(a):
+        candidatos = []
+        if a.inicio_ano:
+            candidatos.append((a.inicio_ano, a.inicio_mes or 1))
+        movs_ativo = [(m.ano, m.mes) for m in a.movs]
+        if movs_ativo:
+            candidatos.append(min(movs_ativo))
+        return min(candidatos) if candidatos else None
+
+    inicio_por_ativo = {a.id: inicio_efetivo(a) for a in ativos}
     if not movs:
         return {"ativos": ativos_out, "meses": {}, "anos": []}
 
@@ -517,8 +531,9 @@ def rent_compute(cid):
         geracao_caixa = 0.0   # rendimento puro dos fundos caixa/DI no mês
         tem_dado = False
         for a in ativos:
-            # ativo ainda não existia neste período (criado depois) -> ignora
-            if a.inicio_ano and (y, mth) < (a.inicio_ano, a.inicio_mes or 1):
+            # ativo ainda não existia neste período (antes do início efetivo) -> ignora
+            inicio = inicio_por_ativo[a.id]
+            if inicio and (y, mth) < inicio:
                 continue
             mv = movs.get((a.id, y, mth))
             base = ultimo_final[a.id]

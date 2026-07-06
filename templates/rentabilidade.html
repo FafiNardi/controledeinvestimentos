@@ -180,7 +180,7 @@
   <h3 style="color:var(--muted);margin:6px 0 8px">Renda passiva gerada</h3>
   <div class="stats" style="padding:0 0 10px">
     <div class="stat"><div class="k">Média mensal (ger. caixa + prov.)</div><div class="v" id="indMedia">—</div></div>
-    <div class="stat"><div class="k">Renda de referência (IBGE)
+    <div class="stat"><div class="k">Renda de referência (IBGE) — <span id="rendaRefAno"></span>
       <input id="rendaRef" style="width:100px;margin-left:6px" onfocus="this.select()" onchange="saveRenda()"></div>
       <div class="v" id="indPct">—</div></div>
     <div class="stat"><div class="k">Total no ano</div><div class="v" id="indTotal">—</div></div>
@@ -641,13 +641,16 @@ function renderCharts(){
   const mesesComDado = MESES.map((_,i)=>mesData(ANO,i+1)).filter(m=>m&&m.tem_dado);
   const totalGer = mesesComDado.reduce((s,m)=>s+m.geracao_total,0);
   const media = mesesComDado.length ? totalGer/mesesComDado.length : 0;
-  const rref = (DATA.carteira && DATA.carteira.renda_ref) || 3457;
+  const rrefMapa = (DATA.carteira && DATA.carteira.renda_ref_por_ano) || {};
+  const rrefPadrao = (DATA.carteira && DATA.carteira.renda_ref) || 3457;
+  const rref = rrefMapa[String(ANO)] !== undefined ? rrefMapa[String(ANO)] : rrefPadrao;
   document.getElementById('indMedia').textContent = BRL(media);
   document.getElementById('indTotal').textContent = BRL(totalGer);
   document.getElementById('indPct').textContent = rref ? (media/rref*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%' : '—';
   const ri = document.getElementById('rendaRef');
   if(document.activeElement!==ri){ ri.value = rref ? BRL(rref) : ''; }
   ri.disabled = !EDIT;
+  document.getElementById('rendaRefAno').textContent = ANO;
 }
 
 async function mov(ativoId, campo, valor){
@@ -676,7 +679,7 @@ async function setClasse(id, classe){
 async function saveRenda(){
   const v = smartNum(document.getElementById('rendaRef').value);
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({renda_ref: v})});
+    body: JSON.stringify({renda_ref: v, ano: ANO})});
   load();
 }
 async function setMoeda(nova){

@@ -7,6 +7,7 @@ Carteira de Investimentos - Rebalanceamento Dinâmico (multi-usuário)
 - Cotação e Valor Patrimonial em tempo real (Yahoo Finance + Fundamentus)
 - Roda com SQLite local OU PostgreSQL na nuvem (Render) via DATABASE_URL
 """
+import json
 import os
 import re
 from datetime import datetime
@@ -59,7 +60,8 @@ class Carteira(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     nome = db.Column(db.String(120), nullable=False)
     carteira_ideal = db.Column(db.Float, default=0)
-    renda_ref = db.Column(db.Float, default=3457)   # Renda Média Brasil (IBGE) p/ comparação
+    renda_ref = db.Column(db.Float, default=3457)   # legado: valor padrão p/ anos sem valor próprio
+    renda_ref_json = db.Column(db.Text, default="")  # {"2017": 1000, "2018": 1200, ...} - por ano
     anos_json = db.Column(db.Text, default="")      # anos extras criados manualmente (ex.: "2017,2018")
     moeda = db.Column(db.String(3), default="BRL")  # BRL ou USD (só formatação de exibição)
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
@@ -367,7 +369,17 @@ def api_config(cid):
     if "carteira_ideal" in data:
         c.carteira_ideal = float(data["carteira_ideal"] or 0)
     if "renda_ref" in data:
-        c.renda_ref = float(data["renda_ref"] or 0)
+        if "ano" in data:
+            mapa = {}
+            if c.renda_ref_json:
+                try:
+                    mapa = json.loads(c.renda_ref_json)
+                except (TypeError, ValueError):
+                    mapa = {}
+            mapa[str(int(data["ano"]))] = float(data["renda_ref"] or 0)
+            c.renda_ref_json = json.dumps(mapa)
+        else:
+            c.renda_ref = float(data["renda_ref"] or 0)
     if data.get("moeda") in ("BRL", "USD"):
         c.moeda = data["moeda"]
     if data.get("nome"):
@@ -608,8 +620,15 @@ def api_rent(cid):
     data = rent_compute(cid)
     data["editavel"] = c.user_id == current_user.id
     anos_cfg = [int(x) for x in (c.anos_json or "").split(",") if x.strip().isdigit()]
+    renda_ref_por_ano = {}
+    if c.renda_ref_json:
+        try:
+            renda_ref_por_ano = json.loads(c.renda_ref_json)
+        except (TypeError, ValueError):
+            renda_ref_por_ano = {}
     data["carteira"] = {"id": c.id, "nome": c.nome, "dono": c.dono.nome,
-                        "renda_ref": c.renda_ref or 3457, "moeda": c.moeda or "BRL"}
+                        "renda_ref": c.renda_ref or 3457, "renda_ref_por_ano": renda_ref_por_ano,
+                        "moeda": c.moeda or "BRL"}
     data["anos_cfg"] = anos_cfg
     return jsonify(data)
 
@@ -711,6 +730,7 @@ def ensure_schema():
                 db.session.commit()
 
     add("carteira", "renda_ref", "renda_ref FLOAT DEFAULT 3457")
+    add("carteira", "renda_ref_json", "renda_ref_json TEXT")
     add("carteira", "anos_json", "anos_json TEXT")
     add("carteira", "moeda", "moeda VARCHAR(3) DEFAULT 'BRL'")
     add("rent_ativo", "is_caixa", "is_caixa INTEGER DEFAULT 0")

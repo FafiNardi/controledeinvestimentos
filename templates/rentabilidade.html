@@ -62,6 +62,7 @@
   th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
      text-transform:uppercase;letter-spacing:.3px;position:relative;overflow:hidden}
+  #tbl thead th{position:sticky;top:0;z-index:5;background:var(--panel)}
   .resizer{position:absolute;right:0;top:0;width:10px;height:100%;cursor:col-resize;z-index:3}
   .resizer::after{content:'';position:absolute;right:3px;top:15%;width:2px;height:70%;
                   background:var(--line);border-radius:2px}
@@ -137,8 +138,8 @@
   </div>
   <table id="tbl" style="table-layout:fixed">
     <thead><tr>
-      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem()" id="thAtivo">Ativo <span id="ordArr" style="color:var(--accent);font-size:10px"></span></th>
-      <th style="text-align:center">Classe</th>
+      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('nome')" id="thAtivo">Ativo <span id="ordArrNome" style="color:var(--accent);font-size:10px"></span></th>
+      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('classe')" id="thClasse">Classe <span id="ordArrClasse" style="color:var(--accent);font-size:10px"></span></th>
       <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
       <th style="text-align:center">Proventos</th><th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
     </tr></thead>
@@ -289,7 +290,8 @@ function smartNum(s){
 
 let DATA = null, CID = null, EDIT = false;
 let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
-let ORD_AZ = 0;   // 0 = ordem original, 1 = A-Z, -1 = Z-A
+let ORD_CAMPO = '';   // '' = ordem original, 'nome' ou 'classe'
+let ORD_DIR = 1;       // 1 = A-Z, -1 = Z-A
 let charts = {};
 let ULTIMO_MES_POR_ANO = {};   // lembra o último mês visto em cada ano
 let FILTRO_CLASSE = '';
@@ -307,9 +309,14 @@ function irParaMes(m){
   render();
 }
 
-function toggleOrdem(){ ORD_AZ = ORD_AZ===1 ? -1 : ORD_AZ===-1 ? 0 : 1;
-  document.getElementById('ordArr').textContent = ORD_AZ===1?'▲':ORD_AZ===-1?'▼':'';
-  renderMes(); }
+function toggleOrdem(campo){
+  if(ORD_CAMPO !== campo){ ORD_CAMPO = campo; ORD_DIR = 1; }
+  else if(ORD_DIR === 1){ ORD_DIR = -1; }
+  else { ORD_CAMPO = ''; ORD_DIR = 1; }
+  document.getElementById('ordArrNome').textContent = ORD_CAMPO==='nome' ? (ORD_DIR===1?'▲':'▼') : '';
+  document.getElementById('ordArrClasse').textContent = ORD_CAMPO==='classe' ? (ORD_DIR===1?'▲':'▼') : '';
+  renderMes();
+}
 async function editarNome(id){
   const a = (DATA.ativos||[]).find(x=>x.id===id);
   const novo = prompt('Editar nome do ativo:', a ? a.nome : '');
@@ -530,7 +537,10 @@ function renderMes(){
     linhas = [];
   }
   if(FILTRO_CLASSE) linhas = linhas.filter(l => classeMap[l.ativo_id] === FILTRO_CLASSE);
-  if(ORD_AZ) linhas = [...linhas].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')*ORD_AZ);
+  if(ORD_CAMPO){
+    const chave = l => ORD_CAMPO==='classe' ? (classeMap[l.ativo_id]||'') : l.nome;
+    linhas = [...linhas].sort((a,b)=>chave(a).localeCompare(chave(b),'pt-BR')*ORD_DIR);
+  }
   if(!linhas.length){
     tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">
       Nenhum ativo ${FILTRO_CLASSE ? 'dessa classe' : 'ativo'} neste mês.</td></tr>`;

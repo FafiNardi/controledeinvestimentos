@@ -159,7 +159,11 @@
   <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><canvas id="chRet"></canvas></div>
   <div class="chartbox"><h3>Retorno acumulado no ano</h3><canvas id="chAcum"></canvas></div>
 
-  <div class="chartbox"><h3>Peso dos ativos em carteira</h3><canvas id="chPeso"></canvas></div>
+  <div class="chartbox"><h3>Peso dos ativos em carteira</h3>
+    <div id="chPesoWrap" style="max-height:420px;overflow-y:auto">
+      <div id="chPesoInner"><canvas id="chPeso"></canvas></div>
+    </div>
+  </div>
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Retorno acumulado (histórico completo de todos os meses da carteira)</span>
@@ -679,11 +683,15 @@ function renderCharts(){
   const ksPeso = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado).sort();
   const md = ksPeso.length ? DATA.meses[ksPeso[ksPeso.length-1]] : null;
   const pesos = md ? md.linhas.filter(l=>l.final>0).sort((a,b)=>b.peso-a.peso) : [];
+  // altura cresce com a quantidade de ativos, senão o Chart.js espreme (ou some com) as barras
+  // menores para caber num espaço fixo; o wrapper tem rolagem própria se ficar muito alto
+  document.getElementById('chPesoInner').style.height = Math.max(240, pesos.length*22) + 'px';
   mkChart('chPeso',{type:'bar',data:{labels:pesos.map(l=>l.nome),
     datasets:[{data:pesos.map(l=>l.peso*100),backgroundColor:'rgba(59,130,246,.7)'}]},
-    options:{indexAxis:'y',plugins:{legend:{display:false},
+    options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.x)}}},
-      scales:{x:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}},y:{grid:GRID,ticks:TICKS}}}});
+      scales:{x:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}},
+        y:{grid:GRID,ticks:{...TICKS,autoSkip:false}}}}});
   // 5. geração de caixa + proventos mês a mês (barras empilhadas)
   const gcx = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
   const gdv = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.dividendos:null;});

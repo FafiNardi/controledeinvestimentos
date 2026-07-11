@@ -138,6 +138,7 @@
   </div>
   <table id="tbl" style="table-layout:fixed">
     <thead><tr>
+      <th style="width:28px"></th>
       <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('nome')" id="thAtivo">Ativo <span id="ordArrNome" style="color:var(--accent);font-size:10px"></span></th>
       <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('classe')" id="thClasse">Classe <span id="ordArrClasse" style="color:var(--accent);font-size:10px"></span></th>
       <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
@@ -524,7 +525,7 @@ function renderMes(){
   const md = mesData(ANO,MES);
   const dis = EDIT ? '' : 'disabled';
   if(!DATA.ativos.length){
-    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:26px;color:var(--muted)">
+    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:26px;color:var(--muted)">
       Nenhum ativo ainda — adicione o primeiro abaixo (ex.: Fundo DI, Ações, IPCA+...).</td></tr>`;
     return;
   }
@@ -547,18 +548,21 @@ function renderMes(){
     linhas = [...linhas].sort((a,b)=>chave(a).localeCompare(chave(b),'pt-BR')*ORD_DIR);
   }
   if(!linhas.length){
-    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">
+    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted)">
       Nenhum ativo ${FILTRO_CLASSE ? 'dessa classe' : 'ativo'} neste mês.</td></tr>`;
     return;
   }
   const moedaHint = MOEDA==='USD' ? 'US$ 0,00' : 'R$ 0,00';
   const listaClasses = classesAtuais();
+  const podeArrastar = EDIT && !ORD_CAMPO && !FILTRO_CLASSE;
   tb.innerHTML = linhas.map(l=>{
     const primeiraVez = !l.tem_mov && l.base===0;
     const classeAtual = classeMap[l.ativo_id];
     const opcoes = listaClasses.includes(classeAtual) || !classeAtual
       ? listaClasses : [...listaClasses, classeAtual];
-    return `<tr>
+    return `<tr data-ativo-id="${l.ativo_id}" ${podeArrastar?'draggable="true"':''}>
+      <td class="drag-handle" style="text-align:center;color:var(--muted);${podeArrastar?'cursor:grab':'cursor:not-allowed;opacity:.35'}"
+        title="${podeArrastar?'Arraste para reordenar':'Desative filtro e ordenação para poder reordenar'}">⠿</td>
       <td><span class="tick" style="cursor:pointer" title="ver detalhes do ativo" onclick="abrirDetalheAtivo(${l.ativo_id})">${l.nome}</span>${EDIT?` <span title="editar nome" style="cursor:pointer;color:var(--muted)" onclick="editarNome(${l.ativo_id})">✎</span>`:''}</td>
       <td style="text-align:center">
         <select ${EDIT?'':'disabled'} onchange="setClasse(${l.ativo_id},this.value)">
@@ -577,6 +581,37 @@ function renderMes(){
       <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>
     </tr>`;
   }).join('');
+  ativarArrastar(podeArrastar);
+}
+
+function ativarArrastar(habilitado){
+  const tbody = document.getElementById('rows');
+  if(!habilitado) return;
+  let arrastando = null;
+  tbody.querySelectorAll('tr[draggable="true"]').forEach(tr=>{
+    tr.addEventListener('dragstart', ()=>{
+      arrastando = tr;
+      tr.style.opacity = '0.4';
+    });
+    tr.addEventListener('dragend', ()=>{
+      tr.style.opacity = '';
+      salvarNovaOrdem();
+    });
+    tr.addEventListener('dragover', e=>{
+      e.preventDefault();
+      if(!arrastando || tr===arrastando) return;
+      const rect = tr.getBoundingClientRect();
+      const depois = (e.clientY - rect.top) > rect.height/2;
+      tr.parentNode.insertBefore(arrastando, depois ? tr.nextSibling : tr);
+    });
+  });
+}
+
+async function salvarNovaOrdem(){
+  const ids = Array.from(document.querySelectorAll('#rows tr[data-ativo-id]')).map(tr=>tr.dataset.ativoId);
+  await fetch('/api/carteira/'+CID+'/rent/reordenar',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ordem: ids})});
+  load();
 }
 
 function renderStats(){

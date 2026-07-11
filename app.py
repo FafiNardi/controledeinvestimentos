@@ -674,6 +674,21 @@ def api_rent_add_ativo(cid):
     return jsonify({"ok": True, "id": a.id})
 
 
+@app.route("/api/carteira/<int:cid>/rent/reordenar", methods=["POST"])
+@login_required
+def api_rent_reordenar(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    ids = request.get_json(force=True).get("ordem") or []
+    ativos = {a.id: a for a in RentAtivo.query.filter_by(carteira_id=cid).all()}
+    for i, aid in enumerate(ids):
+        a = ativos.get(int(aid))
+        if a:
+            a.ordem = i
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/rent/ativos/<int:aid>", methods=["PUT", "DELETE"])
 @login_required
 def api_rent_ativo(aid):

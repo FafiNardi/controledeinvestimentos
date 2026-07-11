@@ -168,6 +168,7 @@
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Retorno acumulado (histórico completo de todos os meses da carteira)</span>
       <select id="selJanela" onchange="renderCharts()" style="font-size:11px;padding:3px 6px">
+        <option value="">Tudo</option>
         <option value="24">24 meses</option>
         <option value="36">36 meses</option>
         <option value="48">48 meses</option>
@@ -667,9 +668,9 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
-  // 3b. acumulado histórico com janela de meses selecionável (24 a 120)
-  const janela = parseInt(document.getElementById('selJanela').value) || 24;
-  const keysJanela = keys.slice(-janela);
+  // 3b. acumulado histórico com janela de meses selecionável (Tudo, ou 24 a 120)
+  const janelaValor = document.getElementById('selJanela').value;
+  const keysJanela = janelaValor ? keys.slice(-parseInt(janelaValor)) : keys;
   mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
     datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',
       backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:0,tension:.2}]},

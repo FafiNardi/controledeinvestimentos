@@ -185,7 +185,13 @@
   </div>
 
   <div class="chartbox"><h3>Geração de Caixa + Proventos (mês a mês)</h3><canvas id="chGer" style="max-height:260px"></canvas></div>
-  <div class="chartbox"><h3>Dividendos acumulados no ano</h3><canvas id="chDiv"></canvas></div>
+  <div class="chartbox">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Dividendos acumulados</span>
+      <select id="selAnoDiv" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
+    </h3>
+    <canvas id="chDiv"></canvas>
+  </div>
 </div>
 
 <div class="wrap">
@@ -499,6 +505,7 @@ function render(){
   }).join('');
   document.getElementById('anoLabel').textContent = ANO;
   popularFiltroClasseRent();
+  popularSelAnoDiv();
   renderMes(); renderStats(); renderResumo(); renderCharts();
 }
 function popularFiltroClasseRent(){
@@ -508,6 +515,15 @@ function popularFiltroClasseRent(){
     .sort((a,b)=>a.localeCompare(b,'pt-BR'));
   sel.innerHTML = '<option value="">Todas</option>' +
     classes.map(c=>`<option ${c===atual?'selected':''}>${c}</option>`).join('');
+}
+function popularSelAnoDiv(){
+  const sel = document.getElementById('selAnoDiv');
+  const atual = sel.value || String(ANO);
+  const base = [...DATA.anos, ...(DATA.anos_cfg||[]), new Date().getFullYear()];
+  const min = Math.min(...base), max = Math.max(...base);
+  const anos = []; for(let a=min; a<=max; a++) anos.push(a);
+  sel.innerHTML = '<option value="">Tudo</option>' +
+    anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
 }
 async function novoAno(){
   const a = prompt('Qual ano deseja adicionar? (ex.: 2017). Todos os anos entre ele e o atual aparecerão.');
@@ -620,12 +636,17 @@ function renderStats(){
   const ultimo = meses.length ? meses[meses.length-1] : null;
   const divAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);
   const gerAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_total:0);},0);
+  // totais de toda a história da carteira (todos os anos, todos os ativos)
+  const totalInvestidoGeral = Object.values(DATA.meses).reduce((s,m)=>s+(m.aportes||0),0);
+  const totalDividendosGeral = Object.values(DATA.meses).reduce((s,m)=>s+(m.dividendos||0),0);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Patrimônio (${MESES[MES-1]}/${ANO})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
     <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
     <div class="stat"><div class="k">Acumulado histórico</div><div class="v ${ultimo&&ultimo.acumulado>=0?'pos':'neg'}">${ultimo?PCT(ultimo.acumulado):'—'}</div></div>
     <div class="stat"><div class="k">Dividendos em ${ANO}</div><div class="v">${BRL(divAno)}</div></div>
     <div class="stat"><div class="k">Ger. caixa + proventos ${ANO}</div><div class="v" style="color:var(--accent)">${BRL(gerAno)}</div></div>
+    <div class="stat"><div class="k">Valor Investido</div><div class="v">${BRL(totalInvestidoGeral)}</div></div>
+    <div class="stat"><div class="k">Dividendos Recebidos (total)</div><div class="v" style="color:var(--accent)">${BRL(totalDividendosGeral)}</div></div>
   `;
 }
 
@@ -675,13 +696,21 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:TICKS},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
-  // 2. dividendos ACUMULADOS no ano (soma corrida mês a mês, zera a cada ano)
-  let acumDiv = 0;
-  const divsAcum = MESES.map((_,i)=>{const m=mesData(ANO,i+1); acumDiv += (m?m.dividendos:0); return acumDiv;});
-  mkChart('chDiv',{type:'bar',data:{labels:MESES,datasets:[{data:divsAcum,backgroundColor:'rgba(45,212,191,.7)'}]},
+  // 2. dividendos ACUMULADOS: de um ano específico (zera em janeiro) ou "Tudo" (nunca zera)
+  const anoDivSel = document.getElementById('selAnoDiv').value;
+  let labelsDiv, divsAcum, acumDiv = 0;
+  if(anoDivSel){
+    labelsDiv = MESES;
+    divsAcum = MESES.map((_,i)=>{const m=mesData(parseInt(anoDivSel),i+1); acumDiv += (m?m.dividendos:0); return acumDiv;});
+  } else {
+    const chavesDiv = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado).sort();
+    labelsDiv = chavesDiv.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);});
+    divsAcum = chavesDiv.map(k=>{ acumDiv += (DATA.meses[k].dividendos||0); return acumDiv; });
+  }
+  mkChart('chDiv',{type:'bar',data:{labels:labelsDiv,datasets:[{data:divsAcum,backgroundColor:'rgba(45,212,191,.7)'}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
-      scales:{x:{grid:GRID,ticks:TICKS},
+      scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
   // 3. acumulado NO ANO selecionado (reseta em 0% em janeiro daquele ano;
   // o histórico completo de todos os anos já aparece no gráfico com janela abaixo)

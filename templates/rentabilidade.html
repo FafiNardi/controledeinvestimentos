@@ -363,7 +363,8 @@ function abrirDetalheAtivo(ativoId){
   chaves.forEach(k=>{
     const mes = DATA.meses[k];
     const linha = mes.linhas.find(l=>l.ativo_id===ativoId);
-    if(!linha) return;
+    // ignora períodos após o ativo ter sido encerrado/vendido (mesma regra da tabela principal)
+    if(!linha || linha.mostrar===false) return;
     if(primeiraBase===null) primeiraBase = linha.base;
     totalAportes += linha.aporte||0;
     totalDividendos += linha.proventos||0;

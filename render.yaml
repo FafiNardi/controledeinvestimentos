@@ -9,10 +9,4 @@ services:
       - key: SECRET_KEY
         generateValue: true          # senha de sessão gerada automaticamente
       - key: DATABASE_URL
-        fromDatabase:
-          name: carteira-db
-          property: connectionString
-
-databases:
-  - name: carteira-db
-    plan: free
+        sync: false                  # banco no Neon (configurado manualmente no painel da Render)

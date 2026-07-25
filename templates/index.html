@@ -232,10 +232,10 @@ async function carregarCarteiras(){
   await load();
 }
 
-function trocarCarteira(){
+async function trocarCarteira(){
   CID = parseInt(document.getElementById('selCarteira').value)||null;
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
-  load();
+  await load();
 }
 
 async function novaCarteira(){
@@ -360,23 +360,23 @@ function renderRows(){
 async function upd(id, field, value){
   await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({[field]: value})});
-  load();
+  await load();
 }
 async function updVpa(id, value){
   const num = smartNum(value);
   await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({vpa: num, vpa_manual: num ? 1 : 0})});
-  load();
+  await load();
 }
 async function del(id){
   if(!confirm('Remover este ativo?')) return;
-  await fetch('/api/assets/'+id, {method:'DELETE'}); load();
+  await fetch('/api/assets/'+id, {method:'DELETE'}); await load();
 }
 async function saveConfig(){
   if(!CID) return;
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({carteira_ideal: smartNum(document.getElementById('carteiraIdeal').value)})});
-  load();
+  await load();
 }
 async function addAsset(){
   const ticker = document.getElementById('newTicker').value.trim();
@@ -391,7 +391,7 @@ async function addAsset(){
       segmento: document.getElementById('newSeg').value
     })});
   ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
-  st.textContent=''; load();
+  st.textContent=''; await load();
 }
 async function saveMoeda(){
   if(!CID) return;
@@ -405,7 +405,7 @@ async function saveMoeda(){
   MOEDA = nova;
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({moeda: MOEDA})});
-  load();
+  await load();
 }
 function toggleTema(){
   const claro = document.documentElement.getAttribute('data-theme')==='light';
@@ -434,7 +434,7 @@ async function refresh(){
   b.disabled=true; st.innerHTML='<span class="spin">⟳</span> atualizando...';
   await fetch('/api/carteira/'+CID+'/refresh',{method:'POST'});
   b.disabled=false; st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
-  load();
+  await load();
 }
 
 fillSelectClasse(document.getElementById('newClasse'), '');

@@ -336,7 +336,7 @@ async function editarNome(id){
   const nome = novo.trim(); if(!nome) return;
   await fetch('/api/rent/ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({nome})});
-  load();
+  await load();
 }
 
 let DET_HISTORICO = [];   // histórico completo do ativo atualmente aberto no modal
@@ -466,10 +466,10 @@ async function carregarCarteiras(){
   localStorage.setItem('ultimaCarteiraId', CID);
   await load();
 }
-function trocarCarteira(){
+async function trocarCarteira(){
   CID = parseInt(document.getElementById('selCarteira').value);
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
-  load();
+  await load();
 }
 
 async function load(){
@@ -534,7 +534,7 @@ async function novoAno(){
   ULTIMO_MES_POR_ANO[ANO] = MES;
   ANO = parseInt(a.trim()); MES = 1;
   ULTIMO_MES_POR_ANO[ANO] = 1;
-  load();
+  await load();
 }
 
 function renderMes(){
@@ -628,7 +628,7 @@ async function salvarNovaOrdem(){
   const ids = Array.from(document.querySelectorAll('#rows tr[data-ativo-id]')).map(tr=>tr.dataset.ativoId);
   await fetch('/api/carteira/'+CID+'/rent/reordenar',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ordem: ids})});
-  load();
+  await load();
 }
 
 function renderStats(){
@@ -787,7 +787,7 @@ function renderCharts(){
 async function mov(ativoId, campo, valor){
   await fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})});
-  load();
+  await load();
 }
 async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();
@@ -795,23 +795,23 @@ async function addAtivo(){
   await fetch('/api/carteira/'+CID+'/rent/ativos',{method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome, ano:ANO, mes:MES})});
   document.getElementById('novoAtivo').value='';
-  load();
+  await load();
 }
 async function delAtivo(id){
   if(!confirm('Excluir este ativo e TODO o seu histórico de lançamentos?')) return;
   await fetch('/api/rent/ativos/'+id,{method:'DELETE'});
-  load();
+  await load();
 }
 async function setClasse(id, classe){
   await fetch('/api/rent/ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({classe})});
-  load();
+  await load();
 }
 async function saveRenda(){
   const v = smartNum(document.getElementById('rendaRef').value);
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({renda_ref: v, ano: ANO})});
-  load();
+  await load();
 }
 async function setMoeda(nova){
   if(nova === MOEDA) return;
@@ -824,7 +824,7 @@ async function setMoeda(nova){
   MOEDA = nova;
   await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({moeda: MOEDA})});
-  load();
+  await load();
 }
 function toggleTema(){
   const claro = document.documentElement.getAttribute('data-theme')==='light';

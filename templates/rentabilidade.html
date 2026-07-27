@@ -59,6 +59,8 @@
   .mes-btn.tem{color:var(--txt)}
   .wrap{padding:0 24px 40px}
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
+  .tbl-scroll{overflow-x:auto;margin-bottom:8px}
+  .tbl-scroll table{width:auto;margin-bottom:0}
   th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
      text-transform:uppercase;letter-spacing:.3px;position:relative;overflow:hidden}
@@ -136,16 +138,18 @@
       </select>
     </label>
   </div>
-  <table id="tbl" style="table-layout:fixed">
-    <thead><tr>
-      <th style="width:28px"></th>
-      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('nome')" id="thAtivo">Ativo <span id="ordArrNome" style="color:var(--accent);font-size:10px"></span></th>
-      <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('classe')" id="thClasse">Classe <span id="ordArrClasse" style="color:var(--accent);font-size:10px"></span></th>
-      <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
-      <th style="text-align:center">Proventos</th><th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
-    </tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <div class="tbl-scroll">
+    <table id="tbl" style="table-layout:fixed">
+      <thead><tr>
+        <th style="width:28px"></th>
+        <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('nome')" id="thAtivo">Ativo <span id="ordArrNome" style="color:var(--accent);font-size:10px"></span></th>
+        <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('classe')" id="thClasse">Classe <span id="ordArrClasse" style="color:var(--accent);font-size:10px"></span></th>
+        <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
+        <th style="text-align:center">Proventos</th><th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
   <div class="addbar" id="addbar">
     <input id="novoAtivo" placeholder="+ Novo ativo (ex.: Fundo DI, PETR4, IPCA+ 2035...)" style="width:320px">
     <button onclick="addAtivo()">Adicionar ativo</button>
@@ -858,11 +862,29 @@ async function deletarCarteira(){
 }
 
 // Colunas redimensionáveis (como no Excel) — largura salva no navegador
+// aplica a largura de cada coluna via folha de estilo dinâmica (th e td por posição),
+// bem mais confiável entre navegadores do que mexer em <col> ou no th diretamente
+function aplicarLarguraColuna(idx, largura, salvar){
+  let styleEl = document.getElementById('colWidthOverrides');
+  if(!styleEl){
+    styleEl = document.createElement('style');
+    styleEl.id = 'colWidthOverrides';
+    document.head.appendChild(styleEl);
+  }
+  const larguras = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
+  larguras[idx] = largura;
+  if(salvar) localStorage.setItem('rentColWidths', JSON.stringify(larguras));
+  styleEl.textContent = Object.entries(larguras).map(([i,w])=>
+    `#tbl th:nth-child(${+i+1}), #tbl td:nth-child(${+i+1}) { width:${w}px; max-width:${w}px; }`
+  ).join('\n');
+}
+
 function makeResizable(){
   const table = document.getElementById('tbl');
+  const ths = table.querySelectorAll('thead th');
   const saved = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
-  table.querySelectorAll('thead th').forEach((th,idx)=>{
-    if(saved[idx]) th.style.width = saved[idx]+'px';
+  ths.forEach((th,idx)=>{
+    if(saved[idx]) aplicarLarguraColuna(idx, saved[idx], false);
     if(th.querySelector('.resizer')) return;
     const r = document.createElement('span');
     r.className = 'resizer';
@@ -870,13 +892,14 @@ function makeResizable(){
     r.addEventListener('mousedown', e=>{
       e.preventDefault();
       const startX = e.pageX, startW = th.offsetWidth;
-      function onMove(ev){ th.style.width = Math.max(40, startW+(ev.pageX-startX))+'px'; }
+      function onMove(ev){
+        const novaLargura = Math.max(28, startW+(ev.pageX-startX));
+        aplicarLarguraColuna(idx, novaLargura, false);
+      }
       function onUp(){
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        const widths = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
-        widths[idx] = th.offsetWidth;
-        localStorage.setItem('rentColWidths', JSON.stringify(widths));
+        aplicarLarguraColuna(idx, th.offsetWidth, true);
       }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);

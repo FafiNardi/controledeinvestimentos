@@ -490,6 +490,7 @@ async function load(){
   document.getElementById('btnRenomear').style.display = EDIT ? '' : 'none';
   if(DATA.anos.length && !DATA.anos.includes(ANO)) ANO = DATA.anos[DATA.anos.length-1];
   render();
+  recarregarLargurasColunas();
 }
 
 function mesKey(a,m){ return a+'-'+String(m).padStart(2,'0'); }
@@ -863,7 +864,10 @@ async function deletarCarteira(){
 
 // Colunas redimensionáveis (como no Excel) — largura salva no navegador
 // aplica a largura de cada coluna via folha de estilo dinâmica (th e td por posição),
-// bem mais confiável entre navegadores do que mexer em <col> ou no th diretamente
+// bem mais confiável entre navegadores do que mexer em <col> ou no th diretamente.
+// A configuração é salva por CARTEIRA (cada carteira do usuário guarda a sua própria).
+function chaveLarguraColunas(){ return 'rentColWidths_' + CID; }
+
 function aplicarLarguraColuna(idx, largura, salvar){
   let styleEl = document.getElementById('colWidthOverrides');
   if(!styleEl){
@@ -871,18 +875,28 @@ function aplicarLarguraColuna(idx, largura, salvar){
     styleEl.id = 'colWidthOverrides';
     document.head.appendChild(styleEl);
   }
-  const larguras = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
+  const chave = chaveLarguraColunas();
+  const larguras = JSON.parse(localStorage.getItem(chave)||'{}');
   larguras[idx] = largura;
-  if(salvar) localStorage.setItem('rentColWidths', JSON.stringify(larguras));
+  if(salvar) localStorage.setItem(chave, JSON.stringify(larguras));
   styleEl.textContent = Object.entries(larguras).map(([i,w])=>
     `#tbl th:nth-child(${+i+1}), #tbl td:nth-child(${+i+1}) { width:${w}px; max-width:${w}px; }`
   ).join('\n');
 }
 
+// recarrega as larguras salvas para a carteira ATUAL, apagando qualquer largura
+// que tenha ficado aplicada de uma carteira diferente
+function recarregarLargurasColunas(){
+  const styleEl = document.getElementById('colWidthOverrides');
+  if(styleEl) styleEl.textContent = '';
+  const saved = JSON.parse(localStorage.getItem(chaveLarguraColunas())||'{}');
+  Object.entries(saved).forEach(([idx,largura])=>aplicarLarguraColuna(parseInt(idx), largura, false));
+}
+
 function makeResizable(){
   const table = document.getElementById('tbl');
   const ths = table.querySelectorAll('thead th');
-  const saved = JSON.parse(localStorage.getItem('rentColWidths')||'{}');
+  const saved = JSON.parse(localStorage.getItem(chaveLarguraColunas())||'{}');
   ths.forEach((th,idx)=>{
     if(saved[idx]) aplicarLarguraColuna(idx, saved[idx], false);
     if(th.querySelector('.resizer')) return;

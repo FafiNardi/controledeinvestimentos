@@ -814,22 +814,25 @@ async function sincronizarEmSegundoPlano(){
   document.getElementById('btnMoedaUSD').classList.toggle('on', MOEDA === 'USD');
   // esses trechos não têm campos de digitação, então podem ser atualizados sem risco
   renderStats(); renderResumo(); renderCharts();
-  atualizarTabelaComCuidado();
+  atualizarColunasCalculadas();
 }
-// Só reconstrói as linhas da tabela quando o usuário não está com o cursor em nenhum campo dela
-// (senão espera ele sair do campo) e preserva a posição de rolagem da tabela.
-function atualizarTabelaComCuidado(){
-  const ativo = document.activeElement;
-  const emCampoDaTabela = ativo && ativo.closest && ativo.closest('#rows');
-  if(emCampoDaTabela){
-    ativo.addEventListener('blur', atualizarTabelaComCuidado, {once:true});
-    return;
-  }
-  const scroller = document.querySelector('.tbl-scroll');
-  const scrollTop = scroller ? scroller.scrollTop : 0;
-  renderMes();
-  recarregarLargurasColunas();
-  if(scroller) scroller.scrollTop = scrollTop;
+// O que o usuário digita (Aporte, Resgate, Proventos, Valor final) NUNCA é reescrito pelo
+// servidor — o navegador já guarda o valor certo, não precisa de confirmação de ninguém.
+// Só as colunas calculadas (Rentabilidade % e Peso) são atualizadas, célula por célula, sem
+// tocar nos campos de digitação nem reconstruir a linha.
+function atualizarColunasCalculadas(){
+  const md = mesData(ANO, MES);
+  if(!md) return;
+  const porAtivo = {};
+  md.linhas.forEach(l=>{ porAtivo[l.ativo_id] = l; });
+  document.querySelectorAll('#rows tr[data-ativo-id]').forEach(tr=>{
+    const l = porAtivo[parseInt(tr.dataset.ativoId)];
+    if(!l) return;
+    const tds = tr.querySelectorAll('td');
+    const tdRent = tds[8], tdPeso = tds[9];
+    if(tdRent){ tdRent.className = l.rent>=0?'pos':'neg'; tdRent.textContent = PCT(l.rent); }
+    if(tdPeso){ tdPeso.textContent = (l.peso*100).toFixed(1)+'%'; }
+  });
 }
 async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();

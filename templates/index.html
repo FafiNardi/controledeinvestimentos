@@ -389,20 +389,29 @@ async function sincronizarEmSegundoPlano(){
   MOEDA = STATE.carteira.moeda || 'BRL';
   // esse trecho não tem campos de digitação, então pode ser atualizado sem risco
   renderStats();
-  atualizarTabelaComCuidado();
+  atualizarColunasCalculadas();
 }
-// Só reconstrói as linhas da tabela quando o usuário não está com o cursor em nenhum campo dela
-// (senão espera ele sair do campo) e preserva a posição de rolagem da página.
-function atualizarTabelaComCuidado(){
-  const ativo = document.activeElement;
-  const emCampoDaTabela = ativo && ativo.closest && ativo.closest('#rows');
-  if(emCampoDaTabela){
-    ativo.addEventListener('blur', atualizarTabelaComCuidado, {once:true});
-    return;
-  }
-  const scrollY = window.scrollY;
-  renderRows();
-  window.scrollTo(0, scrollY);
+// O que o usuário digita (nº de ações, preço médio, VPA, % ideal) NUNCA é reescrito pelo
+// servidor — o navegador já guarda o valor certo, não precisa de confirmação de ninguém.
+// Só as colunas calculadas (tenho, % carteira, quero, falta, decisão, cotas) são atualizadas,
+// célula por célula, sem tocar nos campos de digitação nem reconstruir a linha.
+function atualizarColunasCalculadas(){
+  const porId = {};
+  STATE.assets.forEach(a=>{ porId[a.id] = a; });
+  document.querySelectorAll('#rows tr[data-id]').forEach(tr=>{
+    const a = porId[parseInt(tr.dataset.id)];
+    if(!a) return;
+    const tds = tr.querySelectorAll('td');
+    if(tds[3]) tds[3].textContent = a.pvp?NUM(a.pvp):'—';
+    if(tds[4]) tds[4].textContent = a.dy?NUM(a.dy)+'%':'—';
+    if(tds[7]){ tds[7].className = a.rentabilidade>=0?'pos':'neg'; tds[7].textContent = NUM(a.rentabilidade)+'%'; }
+    if(tds[10]) tds[10].textContent = BRL(a.tenho);
+    if(tds[12]) tds[12].textContent = NUM(a.pct_tenho)+'%';
+    if(tds[13]) tds[13].textContent = BRL(a.quero);
+    if(tds[14]){ tds[14].className = a.falta>=0?'':'neg'; tds[14].textContent = BRL(a.falta); }
+    if(tds[15]){ const buy = a.decisao==='Comprar'; tds[15].innerHTML = `<span class="badge ${buy?'buy':'wait'}">${a.decisao}</span>`; }
+    if(tds[16]){ const buy = a.decisao==='Comprar'; tds[16].innerHTML = buy && a.qtd_cotas>0 ? '<b>'+a.qtd_cotas+'</b>' : '—'; }
+  });
 }
 async function del(id){
   if(!confirm('Remover este ativo?')) return;

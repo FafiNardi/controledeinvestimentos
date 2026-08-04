@@ -82,6 +82,14 @@
   .pos{color:var(--green)} .neg{color:var(--red)}
   .muted{color:var(--muted)}
   .del{color:var(--red);cursor:pointer;background:none;padding:2px 6px;font-size:15px}
+  .lista-ativos-hist{display:flex;flex-direction:column;gap:2px;max-height:340px;overflow-y:auto;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px}
+  .lista-ativos-hist .item{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;
+    align-items:center;justify-content:space-between;gap:8px}
+  .lista-ativos-hist .item:hover{background:var(--panel2)}
+  .lista-ativos-hist .item .nome{font-weight:600}
+  .lista-ativos-hist .item .classe{color:var(--muted);font-size:11px}
+  .lista-ativos-hist .vazio{color:var(--muted);padding:10px;text-align:center}
   .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:8px 24px 40px}
   .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
   .chartbox h3{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
@@ -207,6 +215,13 @@
       <div class="v" id="indPct">—</div></div>
     <div class="stat"><div class="k">Total no ano</div><div class="v" id="indTotal">—</div></div>
   </div>
+</div>
+
+<div class="wrap">
+  <h3 style="color:var(--muted);margin:6px 0 8px">Consultar histórico de um ativo</h3>
+  <input id="buscaAtivoHist" placeholder="🔎 Buscar ativo pelo nome..." style="width:280px;margin-bottom:8px"
+    oninput="renderListaAtivosHist()">
+  <div id="listaAtivosHist" class="lista-ativos-hist"></div>
 </div>
 
 <div id="modalAtivo" class="modal-overlay" style="display:none" onclick="fecharDetalheSeClicarFora(event)">
@@ -512,7 +527,7 @@ function render(){
   document.getElementById('anoLabel').textContent = ANO;
   popularFiltroClasseRent();
   popularSelAnoDiv();
-  renderMes(); renderStats(); renderResumo(); renderCharts();
+  renderMes(); renderStats(); renderResumo(); renderCharts(); renderListaAtivosHist();
 }
 function popularFiltroClasseRent(){
   const sel = document.getElementById('filtroClasseRent');
@@ -787,6 +802,26 @@ function renderCharts(){
   if(document.activeElement!==ri){ ri.value = rref ? BRL(rref) : ''; }
   ri.disabled = !EDIT;
   document.getElementById('rendaRefAno').textContent = ANO;
+}
+
+// Lista com todos os ativos que a carteira já teve (mesmo os que já foram encerrados/vendidos),
+// em ordem alfabética, para achar o histórico de um ativo sem precisar navegar mês a mês
+// procurando o último período em que ele apareceu na tabela.
+function renderListaAtivosHist(){
+  const el = document.getElementById('listaAtivosHist');
+  if(!el) return;
+  const busca = (document.getElementById('buscaAtivoHist').value || '').trim().toLowerCase();
+  let ativos = [...(DATA.ativos||[])].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  if(busca) ativos = ativos.filter(a=>a.nome.toLowerCase().includes(busca));
+  if(!ativos.length){
+    el.innerHTML = `<div class="vazio">Nenhum ativo encontrado.</div>`;
+    return;
+  }
+  el.innerHTML = ativos.map(a=>`
+    <div class="item" onclick="abrirDetalheAtivo(${a.id})">
+      <span class="nome">${a.nome}</span>
+      <span class="classe">${a.classe||''}</span>
+    </div>`).join('');
 }
 
 // Salvamento otimista: o campo já mostra o que foi digitado (o navegador faz isso sozinho),

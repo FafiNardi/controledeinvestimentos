@@ -358,23 +358,22 @@ function renderRows(){
 }
 
 async function upd(id, field, value){
-  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
+  // keepalive garante que o salvamento termine mesmo se o usuário sair da página logo em seguida
+  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
     body: JSON.stringify({[field]: value})});
   agendarRecarregamento();
 }
 async function updVpa(id, value){
   const num = smartNum(value);
-  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
+  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
     body: JSON.stringify({vpa: num, vpa_manual: num ? 1 : 0})});
   agendarRecarregamento();
 }
-// Evita reconstruir a tabela (e perder o campo que o usuário ainda está preenchendo) logo após
-// salvar. Espera uma pequena pausa e, se o usuário ainda estiver com foco em um campo da tabela
-// (ex.: acabou de apertar Tab e já está digitando no próximo), adia até ele sair do campo.
-let _recargaTimer = null;
+// Assim que o salvamento termina, atualiza a tela imediatamente — a não ser que o usuário já
+// esteja digitando no próximo campo da tabela (ex.: apertou Tab rápido); nesse caso espera ele
+// sair do campo, para não apagar o que ele está escrevendo.
 function agendarRecarregamento(){
-  clearTimeout(_recargaTimer);
-  _recargaTimer = setTimeout(_recarregarSeSeguro, 600);
+  _recarregarSeSeguro();
 }
 function _recarregarSeSeguro(){
   const ativo = document.activeElement;

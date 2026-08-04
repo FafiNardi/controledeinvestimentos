@@ -792,7 +792,24 @@ function renderCharts(){
 async function mov(ativoId, campo, valor){
   await fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})});
-  await load();
+  agendarRecarregamento();
+}
+// Evita reconstruir a tabela (e perder o campo que o usuário ainda está preenchendo) logo após
+// salvar. Espera uma pequena pausa e, se o usuário ainda estiver com foco em um campo da tabela
+// (ex.: acabou de apertar Tab e já está digitando no próximo), adia até ele sair do campo.
+let _recargaTimer = null;
+function agendarRecarregamento(){
+  clearTimeout(_recargaTimer);
+  _recargaTimer = setTimeout(_recarregarSeSeguro, 600);
+}
+function _recarregarSeSeguro(){
+  const ativo = document.activeElement;
+  const emCampoDaTabela = ativo && ativo.closest && ativo.closest('#rows');
+  if(emCampoDaTabela){
+    ativo.addEventListener('blur', _recarregarSeSeguro, {once:true});
+    return;
+  }
+  load();
 }
 async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();

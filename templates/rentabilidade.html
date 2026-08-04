@@ -872,10 +872,12 @@ function atualizarColunasCalculadas(){
 async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();
   if(!nome) return;
-  await fetch('/api/carteira/'+CID+'/rent/ativos',{method:'POST',
+  const r = await fetch('/api/carteira/'+CID+'/rent/ativos',{method:'POST',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome, ano:ANO, mes:MES})});
+  const d = await r.json();
   document.getElementById('novoAtivo').value='';
   await load();
+  if(d.reaproveitado) alert(`"${nome}" já existia na carteira — reaproveitando o histórico anterior dele (dividendos e rentabilidade continuam somando junto), em vez de começar um histórico novo.`);
 }
 async function delAtivo(id){
   if(!confirm('Excluir este ativo e TODO o seu histórico de lançamentos?')) return;

@@ -662,6 +662,21 @@ def api_rent_add_ativo(cid):
     nome = (d.get("nome") or "").strip()
     if not nome:
         return jsonify({"erro": "informe um nome"}), 400
+    # se já existe um ativo com esse nome nessa carteira (ex.: você fechou a posição e está
+    # reabrindo agora), reaproveita o mesmo registro em vez de criar um histórico novo e
+    # desconectado — assim o gráfico e as estatísticas continuam somando tudo junto
+    existente = RentAtivo.query.filter_by(carteira_id=cid).filter(
+        db.func.lower(RentAtivo.nome) == nome.lower()).first()
+    if existente:
+        # garante um lançamento (mesmo que zerado) no mês atual, senão o ativo reaproveitado
+        # continuaria escondido da tabela por já ter saldo zerado desde que foi encerrado
+        ano, mes = d.get("ano"), d.get("mes")
+        if ano and mes:
+            ano, mes = int(ano), int(mes)
+            if not RentMov.query.filter_by(ativo_id=existente.id, ano=ano, mes=mes).first():
+                db.session.add(RentMov(ativo_id=existente.id, ano=ano, mes=mes))
+                db.session.commit()
+        return jsonify({"ok": True, "id": existente.id, "reaproveitado": True})
     maxord = db.session.query(db.func.coalesce(db.func.max(RentAtivo.ordem), 0)) \
         .filter_by(carteira_id=cid).scalar()
     # ativo só aparece a partir do mês/ano em que foi criado (não "vaza" para anos anteriores)

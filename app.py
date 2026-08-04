@@ -17,6 +17,7 @@ import yfinance as yf
 from flask import (Flask, jsonify, request, render_template, redirect,
                    url_for, flash, abort)
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 from flask_login import (LoginManager, UserMixin, login_user, logout_user,
                          login_required, current_user)
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -728,7 +729,17 @@ def api_rent_mov():
     for k, v in d.items():
         if k in RENT_FIELDS:
             setattr(mv, k, float(v or 0))
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # duas edições do mesmo ativo/mês chegaram quase juntas: a outra requisição já
+        # criou a linha antes desta commitar. Refaz como atualização da linha existente.
+        db.session.rollback()
+        mv = RentMov.query.filter_by(ativo_id=a.id, ano=ano, mes=mes).first()
+        for k, v in d.items():
+            if k in RENT_FIELDS:
+                setattr(mv, k, float(v or 0))
+        db.session.commit()
     return jsonify({"ok": True})
 
 

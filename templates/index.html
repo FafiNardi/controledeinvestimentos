@@ -357,32 +357,52 @@ function renderRows(){
   });
 }
 
-async function upd(id, field, value){
+// Salvamento otimista: o campo já mostra o que foi digitado (o navegador faz isso sozinho),
+// o salvamento acontece em segundo plano (sem travar a digitação) e a tela só é sincronizada
+// com o servidor (peso, decisão de compra, etc.) um tempo depois, com cuidado pra não atrapalhar
+// quem ainda está digitando nem perder a posição de rolagem.
+function upd(id, field, value){
   // keepalive garante que o salvamento termine mesmo se o usuário sair da página logo em seguida
-  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
-    body: JSON.stringify({[field]: value})});
-  agendarRecarregamento();
+  fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
+    body: JSON.stringify({[field]: value})})
+    .catch(()=>console.error('Falha ao salvar', field, id));
+  agendarSincronizacao();
 }
-async function updVpa(id, value){
+function updVpa(id, value){
   const num = smartNum(value);
-  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
-    body: JSON.stringify({vpa: num, vpa_manual: num ? 1 : 0})});
-  agendarRecarregamento();
+  fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
+    body: JSON.stringify({vpa: num, vpa_manual: num ? 1 : 0})})
+    .catch(()=>console.error('Falha ao salvar vpa', id));
+  agendarSincronizacao();
 }
-// Assim que o salvamento termina, atualiza a tela imediatamente — a não ser que o usuário já
-// esteja digitando no próximo campo da tabela (ex.: apertou Tab rápido); nesse caso espera ele
-// sair do campo, para não apagar o que ele está escrevendo.
-function agendarRecarregamento(){
-  _recarregarSeSeguro();
+let _syncTimer = null;
+function agendarSincronizacao(){
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(sincronizarEmSegundoPlano, 1500);
 }
-function _recarregarSeSeguro(){
+async function sincronizarEmSegundoPlano(){
+  if(!CID) return;
+  const r = await fetch('/api/carteira/'+CID+'/state');
+  if(!r.ok) return;
+  STATE = await r.json();
+  EDIT = STATE.carteira.editavel;
+  MOEDA = STATE.carteira.moeda || 'BRL';
+  // esse trecho não tem campos de digitação, então pode ser atualizado sem risco
+  renderStats();
+  atualizarTabelaComCuidado();
+}
+// Só reconstrói as linhas da tabela quando o usuário não está com o cursor em nenhum campo dela
+// (senão espera ele sair do campo) e preserva a posição de rolagem da página.
+function atualizarTabelaComCuidado(){
   const ativo = document.activeElement;
   const emCampoDaTabela = ativo && ativo.closest && ativo.closest('#rows');
   if(emCampoDaTabela){
-    ativo.addEventListener('blur', _recarregarSeSeguro, {once:true});
+    ativo.addEventListener('blur', atualizarTabelaComCuidado, {once:true});
     return;
   }
-  load();
+  const scrollY = window.scrollY;
+  renderRows();
+  window.scrollTo(0, scrollY);
 }
 async function del(id){
   if(!confirm('Remover este ativo?')) return;

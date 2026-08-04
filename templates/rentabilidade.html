@@ -789,26 +789,47 @@ function renderCharts(){
   document.getElementById('rendaRefAno').textContent = ANO;
 }
 
-async function mov(ativoId, campo, valor){
+// Salvamento otimista: o campo já mostra o que foi digitado (o navegador faz isso sozinho),
+// o salvamento acontece em segundo plano (sem travar a digitação) e a tela só é sincronizada
+// com o servidor (rentabilidade %, patrimônio, gráficos) um tempo depois, com cuidado pra não
+// atrapalhar quem ainda está digitando nem perder a posição de rolagem.
+function mov(ativoId, campo, valor){
   // keepalive garante que o salvamento termine mesmo se o usuário sair da página logo em seguida
-  await fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
-    body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})});
-  agendarRecarregamento();
+  fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
+    body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})})
+    .catch(()=>console.error('Falha ao salvar', campo, ativoId));
+  agendarSincronizacao();
 }
-// Assim que o salvamento termina, atualiza a tela imediatamente — a não ser que o usuário já
-// esteja digitando no próximo campo da tabela (ex.: apertou Tab rápido); nesse caso espera ele
-// sair do campo, para não apagar o que ele está escrevendo.
-function agendarRecarregamento(){
-  _recarregarSeSeguro();
+let _syncTimer = null;
+function agendarSincronizacao(){
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(sincronizarEmSegundoPlano, 1500);
 }
-function _recarregarSeSeguro(){
+async function sincronizarEmSegundoPlano(){
+  const r = await fetch('/api/carteira/'+CID+'/rent');
+  DATA = await r.json();
+  EDIT = DATA.editavel;
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  document.getElementById('btnMoedaBRL').classList.toggle('on', MOEDA !== 'USD');
+  document.getElementById('btnMoedaUSD').classList.toggle('on', MOEDA === 'USD');
+  // esses trechos não têm campos de digitação, então podem ser atualizados sem risco
+  renderStats(); renderResumo(); renderCharts();
+  atualizarTabelaComCuidado();
+}
+// Só reconstrói as linhas da tabela quando o usuário não está com o cursor em nenhum campo dela
+// (senão espera ele sair do campo) e preserva a posição de rolagem da tabela.
+function atualizarTabelaComCuidado(){
   const ativo = document.activeElement;
   const emCampoDaTabela = ativo && ativo.closest && ativo.closest('#rows');
   if(emCampoDaTabela){
-    ativo.addEventListener('blur', _recarregarSeSeguro, {once:true});
+    ativo.addEventListener('blur', atualizarTabelaComCuidado, {once:true});
     return;
   }
-  load();
+  const scroller = document.querySelector('.tbl-scroll');
+  const scrollTop = scroller ? scroller.scrollTop : 0;
+  renderMes();
+  recarregarLargurasColunas();
+  if(scroller) scroller.scrollTop = scrollTop;
 }
 async function addAtivo(){
   const nome = document.getElementById('novoAtivo').value.trim();

@@ -97,15 +97,14 @@
   @media(max-width:900px){.charts{grid-template-columns:1fr}}
   .addbar{display:flex;gap:8px;align-items:center;margin:10px 0 20px}
   .resumo-tab td,.resumo-tab th{font-size:12px}
-  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;
-                 align-items:flex-start;justify-content:center;z-index:100;padding:30px 20px;overflow:auto}
-  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-             padding:22px;max-width:920px;width:100%}
+  .detalhe-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+             padding:22px;margin-top:14px}
+  .detalhe-box.vazio{color:var(--muted);text-align:center;padding:40px 22px}
   .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px}
   .modal-header h2{margin:0;font-size:17px;color:var(--accent)}
-  .modal-box .stats{padding:0 0 16px}
-  .modal-box .chartbox{padding:14px 14px 8px}
-  .modal-box table{font-size:12px}
+  .detalhe-box .stats{padding:0 0 16px}
+  .detalhe-box .chartbox{padding:14px 14px 8px}
+  .detalhe-box table{font-size:12px}
   .hist-3col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
   .hist-3col table{width:100%}
   .hist-3col tbody{display:block;max-height:220px;overflow-y:auto}
@@ -222,13 +221,13 @@
   <input id="buscaAtivoHist" placeholder="🔎 Buscar ativo pelo nome..." style="width:280px;margin-bottom:8px"
     oninput="renderListaAtivosHist()">
   <div id="listaAtivosHist" class="lista-ativos-hist"></div>
-</div>
 
-<div id="modalAtivo" class="modal-overlay" style="display:none" onclick="fecharDetalheSeClicarFora(event)">
-  <div class="modal-box" onclick="event.stopPropagation()">
+  <div id="detalheVazio" class="detalhe-box vazio">Selecione um ativo na lista acima (ou busque pelo nome) para ver o histórico completo dele aqui.</div>
+
+  <div id="detalheAtivo" class="detalhe-box" style="display:none">
     <div class="modal-header">
       <h2 id="detAtivoNome">🔎 Ativo</h2>
-      <button class="ghost" onclick="fecharDetalheAtivo()">✕ Fechar</button>
+      <button class="ghost" onclick="limparSelecaoAtivo()">✕ Limpar seleção</button>
     </div>
     <div class="stats" id="detAtivoStats"></div>
     <div class="chartbox">
@@ -372,8 +371,9 @@ function dividendoNoPeriodo(fatia){
 function abrirDetalheAtivo(ativoId){
   const ativo = (DATA.ativos||[]).find(a=>a.id===ativoId);
   if(!ativo) return;
-  // exibe o modal ANTES de criar o gráfico, senão o Chart.js mede um contêiner de tamanho zero
-  document.getElementById('modalAtivo').style.display = 'flex';
+  // exibe o painel ANTES de criar o gráfico, senão o Chart.js mede um contêiner de tamanho zero
+  document.getElementById('detalheVazio').style.display = 'none';
+  document.getElementById('detalheAtivo').style.display = 'block';
   // percorre todo o historico (todos os meses computados) coletando só os períodos
   // em que este ativo esteve ativo, na ordem cronológica
   const chaves = Object.keys(DATA.meses).sort();
@@ -411,6 +411,11 @@ function abrirDetalheAtivo(ativoId){
   document.getElementById('selJanelaDetTabela').value = '';
   renderizarDetalheJanela();
   renderizarOperacoesAtivo();
+  document.getElementById('detalheAtivo').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function limparSelecaoAtivo(){
+  document.getElementById('detalheAtivo').style.display = 'none';
+  document.getElementById('detalheVazio').style.display = 'block';
 }
 
 function renderizarOperacoesAtivo(){
@@ -463,9 +468,6 @@ function renderizarDetalheJanela(){
     </tr>`;
   }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum lançamento ainda.</td></tr>`;
 }
-function fecharDetalheAtivo(){ document.getElementById('modalAtivo').style.display = 'none'; }
-function fecharDetalheSeClicarFora(e){ if(e.target.id==='modalAtivo') fecharDetalheAtivo(); }
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharDetalheAtivo(); });
 
 async function carregarCarteiras(){
   const r = await fetch('/api/carteiras'); const d = await r.json();

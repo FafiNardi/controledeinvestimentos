@@ -655,21 +655,23 @@ async function salvarNovaOrdem(){
 
 function renderStats(){
   const md = mesData(ANO,MES);
-  const meses = Object.values(DATA.meses).filter(m=>m.tem_dado);
-  const ultimo = meses.length ? meses[meses.length-1] : null;
-  const divAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);
-  const gerAno = MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_total:0);},0);
-  // totais de toda a história da carteira (todos os anos, todos os ativos)
-  const totalInvestidoGeral = Object.values(DATA.meses).reduce((s,m)=>s+(m.aportes||0),0);
-  const totalDividendosGeral = Object.values(DATA.meses).reduce((s,m)=>s+(m.dividendos||0),0);
+  // tudo aqui é acumulado desde o início da carteira até o mês/ano que está sendo navegado —
+  // muda conforme você troca de mês, em vez de sempre mostrar o total geral ou o ano calendário
+  const chaveAtual = mesKey(ANO,MES);
+  const mesesAteAqui = Object.entries(DATA.meses)
+    .filter(([k,m])=>k<=chaveAtual && m.tem_dado)
+    .map(([,m])=>m);
+  const investidoAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.aportes||0),0);
+  const dividendosAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.dividendos||0),0);
+  const geracaoAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.geracao_total||0),0);
+  const rotulo = `${MESES[MES-1]}/${ANO}`;
   document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="k">Patrimônio (${MESES[MES-1]}/${ANO})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
+    <div class="stat"><div class="k">Patrimônio (${rotulo})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
     <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
-    <div class="stat"><div class="k">Acumulado histórico</div><div class="v ${ultimo&&ultimo.acumulado>=0?'pos':'neg'}">${ultimo?PCT(ultimo.acumulado):'—'}</div></div>
-    <div class="stat"><div class="k">Dividendos em ${ANO}</div><div class="v">${BRL(divAno)}</div></div>
-    <div class="stat"><div class="k">Ger. caixa + proventos ${ANO}</div><div class="v" style="color:var(--accent)">${BRL(gerAno)}</div></div>
-    <div class="stat"><div class="k">Valor Investido</div><div class="v">${BRL(totalInvestidoGeral)}</div></div>
-    <div class="stat"><div class="k">Dividendos Recebidos (total)</div><div class="v" style="color:var(--accent)">${BRL(totalDividendosGeral)}</div></div>
+    <div class="stat"><div class="k">Acumulado até ${rotulo}</div><div class="v ${md&&md.acumulado>=0?'pos':'neg'}">${md&&md.acumulado!=null?PCT(md.acumulado):'—'}</div></div>
+    <div class="stat"><div class="k">Ger. caixa + proventos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(geracaoAteAqui)}</div></div>
+    <div class="stat"><div class="k">Valor Investido até ${rotulo}</div><div class="v">${BRL(investidoAteAqui)}</div></div>
+    <div class="stat"><div class="k">Dividendos Recebidos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(dividendosAteAqui)}</div></div>
   `;
 }
 

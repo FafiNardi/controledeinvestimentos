@@ -110,7 +110,14 @@ class RentMov(db.Model):
     aporte = db.Column(db.Float, default=0)
     resgate = db.Column(db.Float, default=0)
     proventos = db.Column(db.Float, default=0)
-    valor_final = db.Column(db.Float, default=0)
+    # SEM default=0 de propósito: precisa dar pra distinguir "usuário lançou 0
+    # porque a posição zerou de verdade" de "usuário ainda não fechou o mês e
+    # não mexeu nesse campo". Com default=0, um mês com só aporte/proventos
+    # lançados (valor final ainda em branco) calculava a rentabilidade como se
+    # o saldo tivesse ido a zero — rentabilidade de quase -100%. Deixando None
+    # até a pessoa preencher de verdade, rent_compute() usa o saldo anterior
+    # como estimativa enquanto o mês não fecha (ver `if final is None` abaixo).
+    valor_final = db.Column(db.Float)
     __table_args__ = (db.UniqueConstraint("ativo_id", "ano", "mes"),)
 
 

@@ -751,8 +751,8 @@ function renderCharts(){
     }
   });
   mkChart('chAcum',{type:'line',data:{labels:keysAno,
-    datasets:[{data:valoresAno,borderColor:'#2dd4bf',
-      backgroundColor:'rgba(45,212,191,.12)',fill:true,pointRadius:0,tension:.2}]},
+    datasets:[{data:valoresAno,borderColor:'#3b82f6',
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:0,tension:.2}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},

@@ -567,6 +567,13 @@ def rent_compute(cid):
             final = (mv.valor_final if mv else None)
             if mv:
                 tem_dado = True
+            # "estimado": o mês ainda não foi fechado (ninguém preencheu valor final
+            # de verdade) — usamos o saldo anterior só pra rentabilidade não desabar
+            # pra -100%, mas isso NUNCA pode aparecer pro usuário como se fosse um
+            # valor digitado, senão ele vê o número, estranha e apaga — o que grava
+            # um zero de verdade e recria o mesmo bug (foi exatamente o que aconteceu
+            # em 2026-08-30 com SGOV/Realty Income).
+            estimado = final is None
             if final is None:
                 final = base if base else 0
             rent = None
@@ -583,7 +590,8 @@ def rent_compute(cid):
             linhas.append({"ativo_id": a.id, "nome": a.nome, "base": base,
                            "aporte": aporte, "resgate": resgate,
                            "proventos": prov, "final": final, "rent": rent,
-                           "tem_mov": bool(mv), "mostrar": mostrar})
+                           "tem_mov": bool(mv), "mostrar": mostrar,
+                           "final_estimado": estimado})
             if mv:
                 ja_comecou[a.id] = True
             tot["base"] += base; tot["aporte"] += aporte

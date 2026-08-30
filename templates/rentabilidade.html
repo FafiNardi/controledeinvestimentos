@@ -614,7 +614,10 @@ function renderMes(){
       <td><input value="${l.aporte?BRL(l.aporte):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aporte',this.value)"></td>
       <td><input value="${l.resgate?BRL(l.resgate):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
       <td><input value="${l.proventos?BRL(l.proventos):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
-      <td><input value="${l.tem_mov?BRL(l.final):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
+      <td><input value="${l.tem_mov && !l.final_estimado?BRL(l.final):''}"
+        placeholder="${l.final_estimado && l.tem_mov ? 'est. '+BRL(l.final) : moedaHint}"
+        title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado — usamos o saldo anterior só pra calcular a rentabilidade. Preencha aqui quando souber o valor final de verdade.' : ''}"
+        ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
       <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
       <td class="muted">${(l.peso*100).toFixed(1)}%</td>
       <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>

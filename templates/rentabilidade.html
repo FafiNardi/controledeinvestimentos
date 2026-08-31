@@ -82,8 +82,14 @@
   .pos{color:var(--green)} .neg{color:var(--red)}
   .muted{color:var(--muted)}
   .del{color:var(--red);cursor:pointer;background:none;padding:2px 6px;font-size:15px}
-  .lista-ativos-hist{display:flex;flex-direction:column;gap:2px;max-height:340px;overflow-y:auto;
-    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px}
+  /* Combobox de busca: a lista fica escondida até o usuário clicar no campo ou digitar, e some
+     de novo ao escolher um ativo ou clicar fora — em vez de ocupar a tela sempre aberta. */
+  .busca-ativo-wrap{position:relative;width:280px;margin-bottom:8px}
+  .lista-ativos-hist{display:none;flex-direction:column;gap:2px;max-height:340px;overflow-y:auto;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;
+    position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;
+    box-shadow:0 8px 24px rgba(0,0,0,.35)}
+  .lista-ativos-hist.aberta{display:flex}
   .lista-ativos-hist .item{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;
     align-items:center;justify-content:space-between;gap:8px}
   .lista-ativos-hist .item:hover{background:var(--panel2)}
@@ -94,6 +100,12 @@
   .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
   .chartbox h3{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
   .chartbox.full{grid-column:1/-1}
+  /* Altura fixa (não proporcional à largura) — sem isso, num monitor largo ou com zoom do
+     navegador diferente de 100%, o Chart.js deixa o gráfico enorme e a tela passa a exigir
+     rolagem só pra caber os gráficos. maintainAspectRatio:false (nos options de cada gráfico)
+     é o que faz o Chart.js respeitar essa altura do container em vez da proporção padrão dele. */
+  .chart-wrap{height:230px}
+  .detalhe-box .chart-wrap{height:190px}
   @media(max-width:900px){.charts{grid-template-columns:1fr}}
   .addbar{display:flex;gap:8px;align-items:center;margin:10px 0 20px}
   .resumo-tab td,.resumo-tab th{font-size:12px}
@@ -168,8 +180,8 @@
 </div>
 
 <div class="charts">
-  <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><canvas id="chRet"></canvas></div>
-  <div class="chartbox"><h3>Retorno acumulado no ano</h3><canvas id="chAcum"></canvas></div>
+  <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><div class="chart-wrap"><canvas id="chRet"></canvas></div></div>
+  <div class="chartbox"><h3>Retorno acumulado no ano</h3><div class="chart-wrap"><canvas id="chAcum"></canvas></div></div>
 
   <div class="chartbox"><h3>Peso dos ativos em carteira</h3>
     <div id="chPesoWrap" style="max-height:420px;overflow-y:auto">
@@ -192,16 +204,16 @@
         <option value="120">120 meses</option>
       </select>
     </h3>
-    <canvas id="chAcumJanela"></canvas>
+    <div class="chart-wrap"><canvas id="chAcumJanela"></canvas></div>
   </div>
 
-  <div class="chartbox"><h3>Geração de Caixa + Proventos (mês a mês)</h3><canvas id="chGer" style="max-height:260px"></canvas></div>
+  <div class="chartbox"><h3>Geração de Caixa + Proventos (mês a mês)</h3><div class="chart-wrap"><canvas id="chGer"></canvas></div></div>
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Dividendos acumulados</span>
       <select id="selAnoDiv" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
     </h3>
-    <canvas id="chDiv"></canvas>
+    <div class="chart-wrap"><canvas id="chDiv"></canvas></div>
   </div>
 </div>
 
@@ -218,9 +230,13 @@
 
 <div class="wrap">
   <h3 style="color:var(--muted);margin:6px 0 8px">Consultar histórico de um ativo</h3>
-  <input id="buscaAtivoHist" placeholder="🔎 Buscar ativo pelo nome..." style="width:280px;margin-bottom:8px"
-    oninput="renderListaAtivosHist()">
-  <div id="listaAtivosHist" class="lista-ativos-hist"></div>
+  <div class="busca-ativo-wrap">
+    <input id="buscaAtivoHist" placeholder="🔎 Clique ou digite pra ver a lista de ativos..." style="width:100%"
+      oninput="renderListaAtivosHist(); abrirListaAtivosHist();"
+      onfocus="abrirListaAtivosHist()"
+      onblur="setTimeout(fecharListaAtivosHist, 150)">
+    <div id="listaAtivosHist" class="lista-ativos-hist"></div>
+  </div>
 
   <div id="detalheVazio" class="detalhe-box vazio">Selecione um ativo na lista acima (ou busque pelo nome) para ver o histórico completo dele aqui.</div>
 
@@ -247,7 +263,7 @@
           <option value="120">120 meses</option>
         </select>
       </h3>
-      <canvas id="chDetAtivo"></canvas>
+      <div class="chart-wrap"><canvas id="chDetAtivo"></canvas></div>
     </div>
     <h3 style="color:var(--muted);margin:20px 0 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Histórico mensal completo</span>
@@ -459,7 +475,7 @@ function renderizarDetalheJanela(){
     data:{labels, datasets:[{data:historico.map(h=>h.acumulado*100), borderColor:'#2dd4bf',
       backgroundColor:'rgba(45,212,191,.12)', fill:true, pointRadius:2, pointHoverRadius:5,
       pointBackgroundColor:'#2dd4bf', tension:.2}]},
-    options:{interaction:{mode:'index', intersect:false},
+    options:{maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
       plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,autoSkip:false,maxRotation:90,minRotation:0}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}
@@ -731,7 +747,7 @@ function renderCharts(){
   const rets = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
   mkChart('chRet',{type:'bar',data:{labels:MESES,datasets:[{data:rets,
     backgroundColor:rets.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)')}]},
-    options:{plugins:{legend:{display:false},
+    options:{maintainAspectRatio:false, plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:TICKS},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
@@ -747,7 +763,7 @@ function renderCharts(){
     divsAcum = chavesDiv.map(k=>{ acumDiv += (DATA.meses[k].dividendos||0); return acumDiv; });
   }
   mkChart('chDiv',{type:'bar',data:{labels:labelsDiv,datasets:[{data:divsAcum,backgroundColor:'rgba(59,130,246,.7)'}]},
-    options:{plugins:{legend:{display:false},
+    options:{maintainAspectRatio:false, plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
@@ -767,7 +783,7 @@ function renderCharts(){
   mkChart('chAcum',{type:'line',data:{labels:keysAno,
     datasets:[{data:valoresAno,borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
       backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:3,pointHoverRadius:6,tension:.2}]},
-    options:{interaction:{mode:'index',intersect:false},
+    options:{maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
@@ -778,7 +794,7 @@ function renderCharts(){
   mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
     datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
       backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:2,pointHoverRadius:5,tension:.2}]},
-    options:{interaction:{mode:'index',intersect:false},
+    options:{maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
@@ -804,7 +820,7 @@ function renderCharts(){
   mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
     {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
     {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},
-    options:{plugins:{legend:{labels:{color:'#8a9bb0'}},
+    options:{maintainAspectRatio:false, plugins:{legend:{labels:{color:'#8a9bb0'}},
         tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
         y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
@@ -838,10 +854,21 @@ function renderListaAtivosHist(){
     return;
   }
   el.innerHTML = ativos.map(a=>`
-    <div class="item" onclick="abrirDetalheAtivo(${a.id})">
+    <div class="item" onclick="selecionarAtivoHist(${a.id}, '${a.nome.replace(/'/g,"\\'")}')">
       <span class="nome">${a.nome}</span>
       <span class="classe">${a.classe||''}</span>
     </div>`).join('');
+}
+function abrirListaAtivosHist(){
+  document.getElementById('listaAtivosHist').classList.add('aberta');
+}
+function fecharListaAtivosHist(){
+  document.getElementById('listaAtivosHist').classList.remove('aberta');
+}
+function selecionarAtivoHist(id, nome){
+  document.getElementById('buscaAtivoHist').value = nome;
+  fecharListaAtivosHist();
+  abrirDetalheAtivo(id);
 }
 
 // Salvamento otimista: o campo já mostra o que foi digitado (o navegador faz isso sozinho),

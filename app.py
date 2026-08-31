@@ -75,6 +75,12 @@ class Carteira(db.Model):
     anos_json = db.Column(db.Text, default="")      # anos extras criados manualmente (ex.: "2017,2018")
     moeda = db.Column(db.String(3), default="BRL")  # BRL ou USD (só formatação de exibição)
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
+    # Faltava isso: sem essa relação, apagar uma carteira só limpava os ativos do
+    # Rebalanceamento (assets acima) — os da Rentabilidade (RentAtivo/RentMov) ficavam
+    # pra trás, presos numa carteira_id que não existe mais, e o banco recusava o DELETE
+    # por violar a chave estrangeira. Só não tinha aparecido antes porque nenhuma carteira
+    # com dado de Rentabilidade tinha sido excluída ainda.
+    rentativos = db.relationship("RentAtivo", cascade="all, delete-orphan")
 
 
 class Asset(db.Model):

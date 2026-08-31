@@ -377,7 +377,7 @@ function abrirDetalheAtivo(ativoId){
   // percorre todo o historico (todos os meses computados) coletando só os períodos
   // em que este ativo esteve ativo, na ordem cronológica
   const chaves = Object.keys(DATA.meses).sort();
-  let acum = 1, primeiraBase = null, totalAportes = 0, totalDividendos = 0;
+  let acum = 1, primeiraBase = null, totalAportes = 0, totalResgates = 0, totalDividendos = 0;
   const historico = [];
   chaves.forEach(k=>{
     const mes = DATA.meses[k];
@@ -386,13 +386,17 @@ function abrirDetalheAtivo(ativoId){
     if(!linha || linha.mostrar===false) return;
     if(primeiraBase===null) primeiraBase = linha.base;
     totalAportes += linha.aporte||0;
+    totalResgates += linha.resgate||0;
     totalDividendos += linha.proventos||0;
     if(linha.rent!=null) acum *= (1+linha.rent);
     historico.push({periodo:k, base:linha.base, aporte:linha.aporte, resgate:linha.resgate,
                      proventos:linha.proventos, final:linha.final, rent:linha.rent, acumulado:acum-1,
                      final_estimado:linha.final_estimado});
   });
-  const totalInvestido = (primeiraBase||0) + totalAportes;
+  // "Total investido" é o dinheiro que ainda está no ativo (aportes menos resgates) — não a soma
+  // bruta de tudo que já entrou, senão um fundo tipo caixa (várias entradas e saídas ao longo dos
+  // anos) mostra um total muito maior do que o saldo que realmente existe hoje.
+  const totalInvestido = Math.max(0, (primeiraBase||0) + totalAportes - totalResgates);
   const pctDividendo = totalInvestido ? (totalDividendos/totalInvestido*100) : 0;
   const rentTotal = acum-1;
   const pctDividendo12 = dividendoNoPeriodo(historico.slice(-12));
@@ -668,7 +672,10 @@ function renderStats(){
   const mesesAteAqui = Object.entries(DATA.meses)
     .filter(([k,m])=>k<=chaveAtual && m.tem_dado)
     .map(([,m])=>m);
-  const investidoAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.aportes||0),0);
+  // Dinheiro que ainda está na carteira (aportes menos resgates) — não a soma bruta de tudo que
+  // já entrou, senão ativos tipo caixa (muita entrada e saída ao longo dos anos) inflam o total
+  // bem além do que existe de verdade hoje.
+  const investidoAteAqui = Math.max(0, mesesAteAqui.reduce((s,m)=>s+(m.aportes||0)-(m.resgates||0),0));
   const dividendosAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.dividendos||0),0);
   const geracaoAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.geracao_total||0),0);
   const rotulo = `${MESES[MES-1]}/${ANO}`;
@@ -758,9 +765,10 @@ function renderCharts(){
     }
   });
   mkChart('chAcum',{type:'line',data:{labels:keysAno,
-    datasets:[{data:valoresAno,borderColor:'#3b82f6',
-      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:0,tension:.2}]},
-    options:{plugins:{legend:{display:false},
+    datasets:[{data:valoresAno,borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:3,pointHoverRadius:6,tension:.2}]},
+    options:{interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
@@ -768,9 +776,10 @@ function renderCharts(){
   const janelaValor = document.getElementById('selJanela').value;
   const keysJanela = janelaValor ? keys.slice(-parseInt(janelaValor)) : keys;
   mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
-    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',
-      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:0,tension:.2}]},
-    options:{plugins:{legend:{display:false},
+    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:2,pointHoverRadius:5,tension:.2}]},
+    options:{interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});

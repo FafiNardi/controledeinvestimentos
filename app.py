@@ -503,7 +503,11 @@ def rent_compute(cid):
     "vazar" para antes do primeiro lançamento em ativos antigos que não têm
     inicio_ano preenchido (criados antes desse recurso existir).
     """
+    # joinedload evita 1 consulta ao banco por ativo (N+1): sem isso, uma carteira
+    # com 50 ativos e anos de histórico faz 50 idas ao banco extras TODA vez que
+    # essa função roda — e ela roda a cada troca de mês, aba ou recarregamento.
     ativos = RentAtivo.query.filter_by(carteira_id=cid) \
+        .options(db.joinedload(RentAtivo.movs)) \
         .order_by(RentAtivo.ordem, RentAtivo.id).all()
     caixa_ids = {a.id for a in ativos if (a.classe or "") == "Caixa" or a.is_caixa}
     movs = {}

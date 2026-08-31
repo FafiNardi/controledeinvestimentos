@@ -389,7 +389,8 @@ function abrirDetalheAtivo(ativoId){
     totalDividendos += linha.proventos||0;
     if(linha.rent!=null) acum *= (1+linha.rent);
     historico.push({periodo:k, base:linha.base, aporte:linha.aporte, resgate:linha.resgate,
-                     proventos:linha.proventos, final:linha.final, rent:linha.rent, acumulado:acum-1});
+                     proventos:linha.proventos, final:linha.final, rent:linha.rent, acumulado:acum-1,
+                     final_estimado:linha.final_estimado});
   });
   const totalInvestido = (primeiraBase||0) + totalAportes;
   const pctDividendo = totalInvestido ? (totalDividendos/totalInvestido*100) : 0;
@@ -465,8 +466,8 @@ function renderizarDetalheJanela(){
     return `<tr>
       <td style="text-align:left">${MESES[+m-1]}/${a}</td>
       <td>${BRL(h.base)}</td><td>${BRL(h.aporte)}</td><td>${BRL(h.resgate)}</td>
-      <td>${BRL(h.proventos)}</td><td>${BRL(h.final)}</td>
-      <td class="${h.rent>=0?'pos':'neg'}">${PCT(h.rent)}</td>
+      <td>${BRL(h.proventos)}</td><td>${h.final_estimado ? '<span class="muted" title="Mês ainda não fechado">— não fechou —</span>' : BRL(h.final)}</td>
+      <td class="${h.rent>=0?'pos':'neg'}">${h.final_estimado ? '<span class="muted">—</span>' : PCT(h.rent)}</td>
       <td class="${h.acumulado>=0?'pos':'neg'}">${PCT(h.acumulado)}</td>
     </tr>`;
   }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum lançamento ainda.</td></tr>`;

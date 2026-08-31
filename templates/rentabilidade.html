@@ -452,9 +452,12 @@ function renderizarDetalheJanela(){
   charts['chDetAtivo'] = new Chart(document.getElementById('chDetAtivo'),{
     type:'line',
     data:{labels, datasets:[{data:historico.map(h=>h.acumulado*100), borderColor:'#2dd4bf',
-      backgroundColor:'rgba(45,212,191,.12)', fill:true, pointRadius:0, tension:.2}]},
-    options:{plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
-      scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}}, y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}
+      backgroundColor:'rgba(45,212,191,.12)', fill:true, pointRadius:2, pointHoverRadius:5,
+      pointBackgroundColor:'#2dd4bf', tension:.2}]},
+    options:{interaction:{mode:'index', intersect:false},
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,autoSkip:false,maxRotation:90,minRotation:0}},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}
   });
 
   document.getElementById('detAtivoRows').innerHTML = historico.length ? historico.map(h=>{
@@ -615,8 +618,8 @@ function renderMes(){
       <td><input value="${l.resgate?BRL(l.resgate):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
       <td><input value="${l.proventos?BRL(l.proventos):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
       <td><input value="${l.tem_mov && !l.final_estimado?BRL(l.final):''}"
-        placeholder="${l.final_estimado && l.tem_mov ? 'est. '+BRL(l.final) : moedaHint}"
-        title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado — usamos o saldo anterior só pra calcular a rentabilidade. Preencha aqui quando souber o valor final de verdade.' : ''}"
+        placeholder="${moedaHint}"
+        title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado. Enquanto não preencher, usamos o saldo anterior só por baixo dos panos pra calcular a rentabilidade — sem mostrar esse número aqui, já que numa renda variável ele pode ficar bem diferente do valor real.' : ''}"
         ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
       <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
       <td class="muted">${(l.peso*100).toFixed(1)}%</td>
@@ -735,7 +738,7 @@ function renderCharts(){
     labelsDiv = chavesDiv.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);});
     divsAcum = chavesDiv.map(k=>{ acumDiv += (DATA.meses[k].dividendos||0); return acumDiv; });
   }
-  mkChart('chDiv',{type:'bar',data:{labels:labelsDiv,datasets:[{data:divsAcum,backgroundColor:'rgba(45,212,191,.7)'}]},
+  mkChart('chDiv',{type:'bar',data:{labels:labelsDiv,datasets:[{data:divsAcum,backgroundColor:'rgba(59,130,246,.7)'}]},
     options:{plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtMoedaChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},

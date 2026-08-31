@@ -33,6 +33,14 @@ if db_url.startswith("postgres://"):           # Render usa esse prefixo antigo
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url or "sqlite:///" + os.path.join(BASE_DIR, "carteira.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# O Render (plano grátis) hiberna o site por inatividade, e o Neon (também grátis)
+# suspende a conexão com o banco depois de um tempo parado. Quando o site acorda,
+# o SQLAlchemy tentava reaproveitar uma conexão que já tinha morrido do lado do
+# banco, e isso derrubava a página com "SSL connection has been closed
+# unexpectedly" (500). pool_pre_ping testa a conexão antes de cada uso e reconecta
+# sozinho se precisar; pool_recycle descarta conexões paradas há mais de 4 min,
+# antes do Neon suspendê-las por conta própria.
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 240}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)

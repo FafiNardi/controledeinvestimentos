@@ -2,8 +2,9 @@
 Carteira de Investimentos - Rebalanceamento Dinâmico (multi-usuário)
 
 - Login / cadastro (cada pessoa cria sua conta)
-- Cada usuário cria várias carteiras; todos veem o rebalanceamento de todos
-  (somente o dono edita a própria carteira)
+- Cada usuário cria várias carteiras; carteiras são privadas — cada um só vê
+  (e edita) as próprias. Antes de 2026-08-31 todo mundo via a carteira de
+  todo mundo (só a edição era travada); mudou a pedido do Rafael.
 - Cotação e Valor Patrimonial em tempo real (Yahoo Finance + Fundamentus)
 - Roda com SQLite local OU PostgreSQL na nuvem (Render) via DATABASE_URL
 """
@@ -316,11 +317,12 @@ def index():
 @app.route("/api/carteiras")
 @login_required
 def api_carteiras():
-    """Todas as carteiras de todos (para o seletor)."""
+    """Só as carteiras do usuário logado (privado desde 2026-08-31 — antes
+    todo mundo via a carteira de todo mundo, só não podia editar a alheia)."""
     out = []
-    for c in Carteira.query.order_by(Carteira.id).all():
+    for c in Carteira.query.filter_by(user_id=current_user.id).order_by(Carteira.id).all():
         out.append({"id": c.id, "nome": c.nome, "dono": c.dono.nome,
-                    "user_id": c.user_id, "minha": c.user_id == current_user.id})
+                    "user_id": c.user_id, "minha": True})
     return jsonify({"carteiras": out, "user_id": current_user.id})
 
 
@@ -354,6 +356,7 @@ def require_owner(c):
 @login_required
 def api_state(cid):
     c = get_carteira_or_404(cid)
+    require_owner(c)  # carteira agora é privada: só o dono enxerga
     assets = Asset.query.filter_by(carteira_id=cid).order_by(Asset.ordem, Asset.id).all()
     computed, total = compute_rows(assets, c.carteira_ideal or 0)
     return jsonify({
@@ -469,7 +472,8 @@ def api_delete_asset(aid):
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
-    c = get_carteira_or_404(cid)  # qualquer logado pode atualizar cotações (dado público)
+    c = get_carteira_or_404(cid)
+    require_owner(c)  # carteira agora é privada: só o dono mexe (antes qualquer logado podia)
     assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
     resultados = []
     for a in assets:
@@ -645,6 +649,7 @@ def rentabilidade():
 @login_required
 def api_rent(cid):
     c = get_carteira_or_404(cid)
+    require_owner(c)  # carteira agora é privada: só o dono enxerga
     data = rent_compute(cid)
     data["editavel"] = c.user_id == current_user.id
     anos_cfg = [int(x) for x in (c.anos_json or "").split(",") if x.strip().isdigit()]

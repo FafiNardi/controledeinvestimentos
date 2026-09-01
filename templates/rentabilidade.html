@@ -216,7 +216,7 @@
 
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <span>Geração de Caixa + Proventos (mês a mês)</span>
+      <span>Geração de Caixa + Proventos (mês a mês) <span class="muted" id="totalGerAno" style="font-weight:400"></span></span>
       <select id="selAnoGer" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
     </h3>
     <div class="chart-wrap"><canvas id="chGer"></canvas></div>
@@ -850,12 +850,15 @@ function renderCharts(){
   const anoGer = parseInt(document.getElementById('selAnoGer').value) || ANO;
   const gcx = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
   const gdv = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.dividendos:null;});
-  // barra extra no fim com a soma do ano inteiro, pra não precisar somar os meses de cabeça
+  // total do ano só como texto ao lado do título — como barra (mesma escala dos meses) o
+  // total sempre é bem maior que qualquer mês sozinho, e "achatava" as barras mensais a ponto
+  // de não dar mais pra comparar um mês com o outro.
   const somaGcx = gcx.reduce((s,v)=>s+(v||0),0);
   const somaGdv = gdv.reduce((s,v)=>s+(v||0),0);
-  mkChart('chGer',{type:'bar',data:{labels:[...MESES,'Total'],datasets:[
-    {label:'Geração de caixa',data:[...gcx,somaGcx],backgroundColor:[...MESES.map(()=>'rgba(45,212,191,.75)'),'rgba(45,212,191,1)']},
-    {label:'Proventos',data:[...gdv,somaGdv],backgroundColor:[...MESES.map(()=>'rgba(59,130,246,.75)'),'rgba(59,130,246,1)']}]},
+  document.getElementById('totalGerAno').textContent = `· Total: ${fmtMoedaChart(somaGcx+somaGdv)}`;
+  mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
+    {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
+    {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},
     options:{maintainAspectRatio:false, plugins:{legend:{labels:{color:'#8a9bb0'}},
         tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},

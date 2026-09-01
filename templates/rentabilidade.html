@@ -187,8 +187,20 @@
 </div>
 
 <div class="charts">
-  <div class="chartbox"><h3>Evolução do retorno da carteira (mês a mês)</h3><div class="chart-wrap"><canvas id="chRet"></canvas></div></div>
-  <div class="chartbox"><h3>Retorno acumulado no ano</h3><div class="chart-wrap"><canvas id="chAcum"></canvas></div></div>
+  <div class="chartbox">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Evolução do retorno da carteira (mês a mês)</span>
+      <select id="selAnoRet" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
+    </h3>
+    <div class="chart-wrap"><canvas id="chRet"></canvas></div>
+  </div>
+  <div class="chartbox">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Retorno acumulado no ano</span>
+      <select id="selAnoAcum" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
+    </h3>
+    <div class="chart-wrap"><canvas id="chAcum"></canvas></div>
+  </div>
 
   <div class="chartbox"><h3>Peso dos ativos em carteira</h3>
     <div id="chPesoWrap" style="max-height:420px;overflow-y:auto">
@@ -565,8 +577,10 @@ function render(){
   }).join('');
   document.getElementById('anoLabel').textContent = ANO;
   popularFiltroClasseRent();
-  popularSelAnoDiv();
-  popularSelAnoGer();
+  popularSeletorAno('selAnoDiv', true);
+  popularSeletorAno('selAnoGer', false);
+  popularSeletorAno('selAnoRet', false);
+  popularSeletorAno('selAnoAcum', false);
   renderMes(); renderStats(); renderResumo(); renderCharts(); renderListaAtivosHist();
 }
 function popularFiltroClasseRent(){
@@ -577,29 +591,22 @@ function popularFiltroClasseRent(){
   sel.innerHTML = '<option value="">Todas</option>' +
     classes.map(c=>`<option ${c===atual?'selected':''}>${c}</option>`).join('');
 }
-function popularSelAnoDiv(){
-  const sel = document.getElementById('selAnoDiv');
-  const atual = sel.value || String(ANO);
+// Seletor de ano de um gráfico: acompanha o ano navegado no topo da página, mas só quando o
+// ANO realmente muda lá em cima (trocar só de mês não mexe) — assim o usuário pode escolher
+// outro ano só pra aquele gráfico específico, sem a tabela/mês em exibição pular pra lá, e sem
+// perder essa escolha a cada clique de mês. Cada gráfico guarda seu próprio "último ano visto".
+const _ultimoAnoPorSeletor = {};
+function popularSeletorAno(idSelect, comOpcaoTudo){
+  const sel = document.getElementById(idSelect);
   const base = [...DATA.anos, ...(DATA.anos_cfg||[]), new Date().getFullYear()];
   const min = Math.min(...base), max = Math.max(...base);
   const anos = []; for(let a=min; a<=max; a++) anos.push(a);
-  sel.innerHTML = '<option value="">Tudo</option>' +
-    anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
-}
-// Diferente do seletor de Dividendos acima (que guarda a escolha do usuário e não muda sozinho),
-// este aqui acompanha o ano navegado no topo da página — mas só quando o ANO realmente muda
-// (trocar de mês dentro do mesmo ano não mexe nele), pra dar pro usuário escolher outro ano só
-// pra esse gráfico sem perder a escolha a cada clique de mês.
-let _ultimoAnoParaGer = null;
-function popularSelAnoGer(){
-  const sel = document.getElementById('selAnoGer');
-  const base = [...DATA.anos, ...(DATA.anos_cfg||[]), new Date().getFullYear()];
-  const min = Math.min(...base), max = Math.max(...base);
-  const anos = []; for(let a=min; a<=max; a++) anos.push(a);
-  const forcar = _ultimoAnoParaGer !== ANO;
-  _ultimoAnoParaGer = ANO;
+  const forcar = _ultimoAnoPorSeletor[idSelect] !== ANO;
+  _ultimoAnoPorSeletor[idSelect] = ANO;
   const atual = forcar ? String(ANO) : (sel.value || String(ANO));
-  sel.innerHTML = anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
+  const opcaoTudo = comOpcaoTudo ? '<option value="">Tudo</option>' : '';
+  sel.innerHTML = opcaoTudo +
+    anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
 }
 async function novoAno(){
   const a = prompt('Qual ano deseja adicionar? (ex.: 2017). Todos os anos entre ele e o atual aparecerão.');
@@ -774,8 +781,9 @@ const fmtPctChart = v => (v==null?0:v).toLocaleString('pt-BR',{minimumFractionDi
 const fmtMoedaChart = v => BRL(v==null?0:v);
 
 function renderCharts(){
-  // 1. retorno mês a mês do ano
-  const rets = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
+  // 1. retorno mês a mês do ano — usa o ano escolhido no seletor do próprio gráfico
+  const anoRet = parseInt(document.getElementById('selAnoRet').value) || ANO;
+  const rets = MESES.map((_,i)=>{const m=mesData(anoRet,i+1);return m&&m.tem_dado&&m.rent!=null?m.rent*100:null;});
   mkChart('chRet',{type:'bar',data:{labels:MESES,datasets:[{data:rets,
     backgroundColor:rets.map(v=>v>=0?'rgba(34,197,94,.7)':'rgba(239,68,68,.7)')}]},
     options:{maintainAspectRatio:false, plugins:{legend:{display:false},
@@ -799,12 +807,14 @@ function renderCharts(){
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
   // 3. acumulado NO ANO selecionado (reseta em 0% em janeiro daquele ano;
-  // o histórico completo de todos os anos já aparece no gráfico com janela abaixo)
+  // o histórico completo de todos os anos já aparece no gráfico com janela abaixo) — usa o
+  // ano escolhido no seletor do próprio gráfico.
   const keys = Object.keys(DATA.meses).filter(k=>DATA.meses[k].tem_dado);
+  const anoAcumSel = parseInt(document.getElementById('selAnoAcum').value) || ANO;
   let acumAno = 1;
   const keysAno = [], valoresAno = [];
   MESES.forEach((nomeMes,i)=>{
-    const m = mesData(ANO,i+1);
+    const m = mesData(anoAcumSel,i+1);
     if(m && m.tem_dado && m.rent!=null){
       acumAno *= (1+m.rent);
       keysAno.push(nomeMes);

@@ -50,11 +50,11 @@
   /* Uma linha só, com rolagem lateral em vez de quebrar — quebrado em telas menores/zoom alto
      ficava com cara de "quebrado" mesmo. Cada caixinha (.stat) tem flex-shrink:0 pra nunca
      espremer o texto, só empurrar pra rolagem. */
-  .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:nowrap;overflow-x:auto}
+  .stats{display:flex;gap:8px;padding:10px 24px;flex-wrap:nowrap;overflow-x:auto}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-        padding:10px 16px;min-width:150px;flex-shrink:0}
-  .stat .k{font-size:11px;color:var(--muted)}
-  .stat .v{font-size:18px;font-weight:700;margin-top:2px}
+        padding:7px 10px;min-width:108px;flex-shrink:0}
+  .stat .k{font-size:10px;color:var(--muted);white-space:nowrap}
+  .stat .v{font-size:14px;font-weight:700;margin-top:2px;white-space:nowrap}
   .tabs{display:flex;gap:6px;padding:4px 24px 10px;flex-wrap:wrap;align-items:center}
   .tab{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
        padding:6px 14px;border-radius:20px;cursor:pointer;font-weight:600;font-size:12px}

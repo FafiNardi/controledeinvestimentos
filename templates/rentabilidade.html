@@ -20,8 +20,12 @@
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
        background:var(--bg);color:var(--txt);font-size:13px}
-  header{padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  /* Uma linha só, com rolagem lateral em vez de quebrar em telas menores/zoom alto — o
+     cabeçalho quebrado em duas linhas ficava com cara de "quebrado". flex-shrink:0 nos
+     filhos garante que nada fica espremido, só empurra pra rolagem. */
+  header{padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:nowrap;overflow-x:auto;
          border-bottom:1px solid var(--line);background:var(--panel)}
+  header > *{flex-shrink:0}
   h1{font-size:18px;margin:0;color:var(--accent);font-weight:700}
   select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
              border-radius:6px;padding:6px 8px;font-size:13px}
@@ -43,9 +47,12 @@
   .moeda-opt:hover{filter:brightness(1.1)}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
-  .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:wrap}
+  /* Uma linha só, com rolagem lateral em vez de quebrar — quebrado em telas menores/zoom alto
+     ficava com cara de "quebrado" mesmo. Cada caixinha (.stat) tem flex-shrink:0 pra nunca
+     espremer o texto, só empurrar pra rolagem. */
+  .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:nowrap;overflow-x:auto}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-        padding:10px 16px;min-width:150px}
+        padding:10px 16px;min-width:150px;flex-shrink:0}
   .stat .k{font-size:11px;color:var(--muted)}
   .stat .v{font-size:18px;font-weight:700;margin-top:2px}
   .tabs{display:flex;gap:6px;padding:4px 24px 10px;flex-wrap:wrap;align-items:center}
@@ -843,9 +850,12 @@ function renderCharts(){
   const anoGer = parseInt(document.getElementById('selAnoGer').value) || ANO;
   const gcx = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
   const gdv = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.dividendos:null;});
-  mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
-    {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
-    {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},
+  // barra extra no fim com a soma do ano inteiro, pra não precisar somar os meses de cabeça
+  const somaGcx = gcx.reduce((s,v)=>s+(v||0),0);
+  const somaGdv = gdv.reduce((s,v)=>s+(v||0),0);
+  mkChart('chGer',{type:'bar',data:{labels:[...MESES,'Total'],datasets:[
+    {label:'Geração de caixa',data:[...gcx,somaGcx],backgroundColor:[...MESES.map(()=>'rgba(45,212,191,.75)'),'rgba(45,212,191,1)']},
+    {label:'Proventos',data:[...gdv,somaGdv],backgroundColor:[...MESES.map(()=>'rgba(59,130,246,.75)'),'rgba(59,130,246,1)']}]},
     options:{maintainAspectRatio:false, plugins:{legend:{labels:{color:'#8a9bb0'}},
         tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
@@ -970,16 +980,24 @@ async function saveRenda(){
 }
 async function setMoeda(nova){
   if(nova === MOEDA) return;
-  const mapa = nova==='USD' ? CLASSE_BRL_TO_USD : CLASSE_USD_TO_BRL;
-  const traducoes = (DATA.ativos||[])
-    .filter(a => mapa[a.classe])
-    .map(a => fetch('/api/rent/ativos/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({classe: mapa[a.classe]})}));
-  await Promise.all(traducoes);
-  MOEDA = nova;
-  await fetch('/api/carteira/'+CID+'/config',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({moeda: MOEDA})});
-  await load();
+  // feedback na hora — sem isso, numa carteira grande a troca demora um instante e o botão
+  // parece que não reagiu; a pessoa clicava em outra coisa achando que travou.
+  const btnBRL = document.getElementById('btnMoedaBRL'), btnUSD = document.getElementById('btnMoedaUSD');
+  btnBRL.disabled = true; btnUSD.disabled = true;
+  const original = (nova==='USD' ? btnUSD : btnBRL).textContent;
+  (nova==='USD' ? btnUSD : btnBRL).textContent = '…';
+  try{
+    // 1 requisição só (troca a moeda E traduz a classe de todo mundo no servidor) — antes eram
+    // uma requisição POR ativo, e numa carteira grande isso virava uma fila lenta de dezenas
+    // de chamadas ao mesmo tempo.
+    await fetch('/api/carteira/'+CID+'/rent/moeda',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({moeda: nova})});
+    MOEDA = nova;
+    await load();
+  } finally {
+    btnBRL.disabled = false; btnUSD.disabled = false;
+    (nova==='USD' ? btnUSD : btnBRL).textContent = original;
+  }
 }
 function toggleTema(){
   const claro = document.documentElement.getAttribute('data-theme')==='light';

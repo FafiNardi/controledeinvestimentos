@@ -743,6 +743,33 @@ def api_rent_reordenar(cid):
     return jsonify({"ok": True})
 
 
+# Mapas de tradução de classe ao trocar de moeda — espelham CLASSE_BRL_TO_USD /
+# CLASSE_USD_TO_BRL do rentabilidade.html. Ficam duplicados de propósito (front só
+# usa o dele pra popular o <select> na hora, sem depender de round-trip nenhum).
+CLASSE_BRL_TO_USD = {"Renda Fixa": "Bond", "FII": "REIT", "Ações": "Stocks", "ETF": "ETF", "Caixa": "Cash"}
+CLASSE_USD_TO_BRL = {"Bond": "Renda Fixa", "REIT": "FII", "Stocks": "Ações", "ETF": "ETF", "Cash": "Caixa"}
+
+
+@app.route("/api/carteira/<int:cid>/rent/moeda", methods=["POST"])
+@login_required
+def api_rent_moeda(cid):
+    """Troca a moeda da carteira E traduz a classe de todos os ativos NUMA TACADA SÓ.
+    Antes o front fazia um PUT por ativo (às vezes dezenas, uma carteira grande = uma
+    fila de requisições) — lento e, pro usuário, parecia que o botão nem tinha reagido."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    nova = request.get_json(force=True).get("moeda")
+    if nova not in ("BRL", "USD"):
+        return jsonify({"erro": "moeda inválida"}), 400
+    mapa = CLASSE_BRL_TO_USD if nova == "USD" else CLASSE_USD_TO_BRL
+    for a in RentAtivo.query.filter_by(carteira_id=cid).all():
+        if a.classe in mapa:
+            a.classe = mapa[a.classe]
+    c.moeda = nova
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/rent/ativos/<int:aid>", methods=["PUT", "DELETE"])
 @login_required
 def api_rent_ativo(aid):

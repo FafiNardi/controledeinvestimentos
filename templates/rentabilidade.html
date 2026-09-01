@@ -207,7 +207,13 @@
     <div class="chart-wrap"><canvas id="chAcumJanela"></canvas></div>
   </div>
 
-  <div class="chartbox"><h3>Geração de Caixa + Proventos (mês a mês)</h3><div class="chart-wrap"><canvas id="chGer"></canvas></div></div>
+  <div class="chartbox">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span>Geração de Caixa + Proventos (mês a mês)</span>
+      <select id="selAnoGer" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
+    </h3>
+    <div class="chart-wrap"><canvas id="chGer"></canvas></div>
+  </div>
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Dividendos acumulados</span>
@@ -553,6 +559,7 @@ function render(){
   document.getElementById('anoLabel').textContent = ANO;
   popularFiltroClasseRent();
   popularSelAnoDiv();
+  popularSelAnoGer();
   renderMes(); renderStats(); renderResumo(); renderCharts(); renderListaAtivosHist();
 }
 function popularFiltroClasseRent(){
@@ -571,6 +578,21 @@ function popularSelAnoDiv(){
   const anos = []; for(let a=min; a<=max; a++) anos.push(a);
   sel.innerHTML = '<option value="">Tudo</option>' +
     anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
+}
+// Diferente do seletor de Dividendos acima (que guarda a escolha do usuário e não muda sozinho),
+// este aqui acompanha o ano navegado no topo da página — mas só quando o ANO realmente muda
+// (trocar de mês dentro do mesmo ano não mexe nele), pra dar pro usuário escolher outro ano só
+// pra esse gráfico sem perder a escolha a cada clique de mês.
+let _ultimoAnoParaGer = null;
+function popularSelAnoGer(){
+  const sel = document.getElementById('selAnoGer');
+  const base = [...DATA.anos, ...(DATA.anos_cfg||[]), new Date().getFullYear()];
+  const min = Math.min(...base), max = Math.max(...base);
+  const anos = []; for(let a=min; a<=max; a++) anos.push(a);
+  const forcar = _ultimoAnoParaGer !== ANO;
+  _ultimoAnoParaGer = ANO;
+  const atual = forcar ? String(ANO) : (sel.value || String(ANO));
+  sel.innerHTML = anos.map(a=>`<option value="${a}" ${String(a)===atual?'selected':''}>${a}</option>`).join('');
 }
 async function novoAno(){
   const a = prompt('Qual ano deseja adicionar? (ex.: 2017). Todos os anos entre ele e o atual aparecerão.');
@@ -698,6 +720,8 @@ function renderStats(){
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Patrimônio (${rotulo})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
     <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
+    <div class="stat"><div class="k">Dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.dividendos):'—'}</div></div>
+    <div class="stat"><div class="k">Ger. caixa + dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.geracao_total):'—'}</div></div>
     <div class="stat"><div class="k">Acumulado até ${rotulo}</div><div class="v ${md&&md.acumulado>=0?'pos':'neg'}">${md&&md.acumulado!=null?PCT(md.acumulado):'—'}</div></div>
     <div class="stat"><div class="k">Ger. caixa + proventos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(geracaoAteAqui)}</div></div>
     <div class="stat"><div class="k">Valor Investido até ${rotulo}</div><div class="v">${BRL(investidoAteAqui)}</div></div>
@@ -814,9 +838,11 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.x)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}},
         y:{grid:GRID,ticks:{...TICKS,autoSkip:false}}}}});
-  // 5. geração de caixa + proventos mês a mês (barras empilhadas)
-  const gcx = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
-  const gdv = MESES.map((_,i)=>{const m=mesData(ANO,i+1);return m&&m.tem_dado?m.dividendos:null;});
+  // 5. geração de caixa + proventos mês a mês (barras empilhadas) — usa o ano escolhido no
+  // seletor do próprio gráfico, não necessariamente o ano navegado no topo da página.
+  const anoGer = parseInt(document.getElementById('selAnoGer').value) || ANO;
+  const gcx = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.geracao_caixa:null;});
+  const gdv = MESES.map((_,i)=>{const m=mesData(anoGer,i+1);return m&&m.tem_dado?m.dividendos:null;});
   mkChart('chGer',{type:'bar',data:{labels:MESES,datasets:[
     {label:'Geração de caixa',data:gcx,backgroundColor:'rgba(45,212,191,.75)'},
     {label:'Proventos',data:gdv,backgroundColor:'rgba(59,130,246,.75)'}]},

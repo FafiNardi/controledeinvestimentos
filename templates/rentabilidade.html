@@ -6,89 +6,125 @@
 <title>Rentabilidade • Carteira</title>
 <script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   :root{
-    --bg:#0f1419; --panel:#1a2230; --panel2:#212c3d; --line:#2c3a4f;
-    --txt:#e6edf3; --muted:#8a9bb0; --accent:#2dd4bf; --blue:#3b82f6;
-    --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754;
   }
   html[data-theme="light"]{
-    --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f5; --line:#d7dee6;
-    --txt:#1a2230; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#2563eb;
-    --green:#16a34a; --red:#dc2626; --amber:#d97706;
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
-       background:var(--bg);color:var(--txt);font-size:13px}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .num,.stat .v,td,.resumo-tab td,td input{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
   /* Uma linha só, com rolagem lateral em vez de quebrar em telas menores/zoom alto — o
      cabeçalho quebrado em duas linhas ficava com cara de "quebrado". flex-shrink:0 nos
      filhos garante que nada fica espremido, só empurra pra rolagem. */
-  header{padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:nowrap;overflow-x:auto;
+  header{padding:12px 24px;display:flex;align-items:center;gap:14px;flex-wrap:nowrap;overflow-x:auto;
          border-bottom:1px solid var(--line);background:var(--panel)}
   header > *{flex-shrink:0}
-  h1{font-size:18px;margin:0;color:var(--accent);font-weight:700}
+  h1{font-size:15px;margin:0;color:var(--txt);font-weight:800;letter-spacing:-.01em;
+     display:flex;align-items:center;gap:8px}
+  h1 .mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,var(--accent),var(--blue));
+           display:inline-block}
   select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-             border-radius:6px;padding:6px 8px;font-size:13px}
-  button{background:var(--blue);color:#fff;border:0;border-radius:6px;
-         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
   button:hover{filter:brightness(1.1)}
-  button.ghost{background:var(--panel2);border:1px solid var(--line)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
   .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
-            border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
-  .nav-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+            border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  .nav-btn.on{background:var(--txt);color:var(--bg);border-color:var(--txt)}
   .nav-btn:hover{filter:brightness(1.1)}
   .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
   .userbox a{color:var(--accent);text-decoration:none}
-  .moeda-switch{display:flex;border:1px solid var(--line);border-radius:20px;overflow:hidden}
+  .moeda-switch{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
   .moeda-opt{background:var(--panel2);color:var(--muted);border:0;border-radius:0;
-             padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
+             padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
   .moeda-opt:first-child{border-right:1px solid var(--line)}
-  .moeda-opt.on{background:var(--blue);color:#fff}
+  .moeda-opt.on{background:var(--accent);color:#04211d}
   .moeda-opt:hover{filter:brightness(1.1)}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
-  /* Uma linha só, com rolagem lateral em vez de quebrar — quebrado em telas menores/zoom alto
-     ficava com cara de "quebrado" mesmo. Cada caixinha (.stat) tem flex-shrink:0 pra nunca
-     espremer o texto, só empurrar pra rolagem. */
-  .stats{display:flex;gap:8px;padding:10px 24px;flex-wrap:nowrap;overflow-x:auto}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-        padding:7px 10px;min-width:108px;flex-shrink:0}
-  .stat .k{font-size:10px;color:var(--muted);white-space:nowrap}
-  .stat .v{font-size:14px;font-weight:700;margin-top:2px;white-space:nowrap}
-  .tabs{display:flex;gap:6px;padding:4px 24px 10px;flex-wrap:wrap;align-items:center}
-  .tab{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
-       padding:6px 14px;border-radius:20px;cursor:pointer;font-weight:600;font-size:12px}
-  .tab.on{background:var(--blue);color:#fff;border-color:var(--blue)}
-  .mes-nav{display:flex;gap:6px;padding:0 24px 10px;flex-wrap:wrap}
-  .mes-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
-       padding:5px 11px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px}
-  .mes-btn.on{background:var(--accent);color:#08302b;border-color:var(--accent)}
+
+  /* ---- Faixa de destaque: Patrimônio e Retorno viram a "manchete", o resto fica
+     como métricas de apoio menores — só CSS, o JS continua gerando os mesmos 8
+     blocos .stat na mesma ordem de sempre; aqui a gente só estiliza os dois
+     primeiros de forma diferente pelo :nth-child. Escopado por #stats (id), pra
+     não afetar os outros usos de .stats (modal de ativo, renda passiva). */
+  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:nowrap;overflow-x:auto;align-items:flex-end}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+        padding:8px 12px;min-width:112px;flex-shrink:0}
+  .stat .k{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .stat .v{font-size:14.5px;font-weight:600;margin-top:3px;white-space:nowrap}
+  #stats{border-bottom:1px solid var(--line)}
+  #stats .stat:first-child{background:none;border:0;padding:0 20px 0 0;min-width:0}
+  #stats .stat:first-child .k{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+  #stats .stat:first-child .v{font-size:32px;font-weight:600;margin-top:6px;letter-spacing:-.01em}
+  #stats .stat:nth-child(2){background:none;border:0;padding:0 20px 0 0;min-width:0;align-self:center}
+  #stats .stat:nth-child(2) .k{display:none}
+  #stats .stat:nth-child(2) .v{font-size:13px;font-weight:700;padding:6px 12px;border-radius:999px;margin-top:0}
+  #stats .stat:nth-child(2) .v.pos{background:rgba(52,211,153,.16);color:var(--green)}
+  #stats .stat:nth-child(2) .v.neg{background:rgba(248,113,113,.16);color:var(--red)}
+
+  /* ---- Linha do tempo: ano + mês + filtro de classe juntos, uma faixa só */
+  .timeline{display:flex;align-items:center;gap:14px;padding:10px 24px 14px;flex-wrap:nowrap;
+            overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .timeline-div{width:1px;align-self:stretch;background:var(--line);flex-shrink:0}
+  .timeline-spacer{flex:1;min-width:8px}
+  .timeline .tabs,.timeline .mes-nav{padding:0;flex-wrap:nowrap;flex-shrink:0}
+  .tabs{display:flex;gap:5px;padding:4px 24px 10px;flex-wrap:wrap;align-items:center}
+  .tab{background:none;border:0;color:var(--muted);
+       padding:6px 10px;border-radius:7px;cursor:pointer;font-weight:700;font-size:12.5px}
+  .tab.on{background:var(--panel2);color:var(--txt)}
+  .mes-nav{display:flex;gap:3px;padding:0 24px 10px;flex-wrap:wrap}
+  .mes-btn{background:none;border:0;color:var(--muted);
+       padding:6px 10px;border-radius:7px;cursor:pointer;font-weight:600;font-size:12.5px}
+  .mes-btn.on{background:var(--accent);color:#04211d;font-weight:700}
   .mes-btn.tem{color:var(--txt)}
   .wrap{padding:0 24px 40px}
-  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
-  .tbl-scroll{overflow-x:auto;margin-bottom:8px}
-  .tbl-scroll table{width:auto;margin-bottom:0}
-  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
-  th{background:var(--panel);color:var(--muted);font-weight:600;font-size:11px;
-     text-transform:uppercase;letter-spacing:.3px;position:relative;overflow:hidden}
-  #tbl thead th{position:sticky;top:0;z-index:5;background:var(--panel)}
+  /* ---- Ficha de lançamento: a tabela editável vira um cartão único (borda + fundo
+     próprio), em vez de tabela solta seguida do rodapé de adicionar ativo separado. */
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:0}
+  .tbl-scroll{overflow-x:auto}
+  .tbl-scroll table{width:auto}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.5px;
+     text-transform:uppercase;letter-spacing:.05em;position:relative;overflow:hidden}
+  #tbl thead th{position:sticky;top:0;z-index:5;background:var(--panel2)}
   .resizer{position:absolute;right:0;top:0;width:10px;height:100%;cursor:col-resize;z-index:3}
   .resizer::after{content:'';position:absolute;right:3px;top:15%;width:2px;height:70%;
                   background:var(--line);border-radius:2px}
   .resizer:hover::after,.resizer.active::after{background:var(--blue);width:3px;right:2.5px}
   td:first-child,th:first-child{text-align:left}
-  tr:hover td{background:rgba(255,255,255,.03)}
-  .tick{font-weight:700;color:var(--accent)}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  .tick{font-weight:700;color:var(--accent);font-family:'Manrope',sans-serif}
   #tbl td{text-align:center}
   #tbl td:first-child{text-align:left}
   td input{background:transparent;border:1px solid transparent;color:var(--txt);
-    text-align:center;width:110px;padding:4px;border-radius:5px;font-size:12.5px}
+    text-align:center;width:110px;padding:5px;border-radius:6px;font-size:12.5px}
   td input:hover{border-color:var(--line)}
-  td input:focus{border-color:var(--blue);background:var(--panel2);outline:0}
+  td input:focus{border-color:var(--accent);background:var(--panel2);outline:0}
   td input:disabled{border-color:transparent !important;opacity:1}
   .pos{color:var(--green)} .neg{color:var(--red)}
   .muted{color:var(--muted)}
   .del{color:var(--red);cursor:pointer;background:none;padding:2px 6px;font-size:15px}
+  /* barrinha de peso ao lado do %, pra comparar de relance quem pesa mais na carteira */
+  .peso-bar{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+  .peso-bar .track{width:36px;height:4px;border-radius:2px;background:var(--panel2);overflow:hidden;flex-shrink:0}
+  .peso-bar .fill{height:100%;background:var(--blue)}
+  .addbar{border-top:1px solid var(--line);background:var(--panel2);
+          display:flex;gap:8px;align-items:center;padding:11px 14px;margin:0}
   /* Combobox de busca: a lista fica escondida até o usuário clicar no campo ou digitar, e some
      de novo ao escolher um ativo ou clicar fora — em vez de ocupar a tela sempre aberta. */
   .busca-ativo-wrap{position:relative;width:280px;margin-bottom:8px}
@@ -103,9 +139,16 @@
   .lista-ativos-hist .item .nome{font-weight:600}
   .lista-ativos-hist .item .classe{color:var(--muted);font-size:11px}
   .lista-ativos-hist .vazio{color:var(--muted);padding:10px;text-align:center}
-  .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:8px 24px 40px}
-  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
-  .chartbox h3{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
+  /* ---- Grupos de gráficos (Desempenho / Renda passiva), com um rótulo + linha
+     separando cada grupo — puramente estrutural, ajuda a escanear a seção. */
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 24px 8px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 24px 30px}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
+            box-shadow:0 1px 2px rgba(0,0,0,.1)}
+  .chartbox h3{margin:0 0 10px;font-size:12.5px;color:var(--txt);font-weight:700}
   .chartbox.full{grid-column:1/-1}
   /* Altura fixa (não proporcional à largura) — sem isso, num monitor largo ou com zoom do
      navegador diferente de 100%, o Chart.js deixa o gráfico enorme e a tela passa a exigir
@@ -114,10 +157,9 @@
   .chart-wrap{height:230px}
   .detalhe-box .chart-wrap{height:190px}
   @media(max-width:900px){.charts{grid-template-columns:1fr}}
-  .addbar{display:flex;gap:8px;align-items:center;margin:10px 0 20px}
   .resumo-tab td,.resumo-tab th{font-size:12px}
   .detalhe-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-             padding:22px;margin-top:14px}
+             padding:22px;margin-top:14px;box-shadow:0 1px 2px rgba(0,0,0,.1)}
   .detalhe-box.vazio{color:var(--muted);text-align:center;padding:40px 22px}
   .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px}
   .modal-header h2{margin:0;font-size:17px;color:var(--accent)}
@@ -133,7 +175,7 @@
 </head>
 <body>
 <header>
-  <h1>📈 Rentabilidade</h1>
+  <h1><span class="mark"></span>Rentabilidade</h1>
   <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
     <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
   </label>
@@ -154,16 +196,19 @@
 </header>
 
 <div class="stats" id="stats"></div>
-<div class="tabs" id="anoTabs"></div>
-<div class="mes-nav" id="mesNav"></div>
+<div class="timeline">
+  <div class="tabs" id="anoTabs"></div>
+  <div class="timeline-div"></div>
+  <div class="mes-nav" id="mesNav"></div>
+  <div class="timeline-spacer"></div>
+  <label class="muted" style="display:flex;align-items:center;gap:6px">Classe:
+    <select id="filtroClasseRent" onchange="setFiltroClasse(this.value)">
+      <option value="">Todas</option>
+    </select>
+  </label>
+</div>
 
-  <div class="tabs" style="padding-top:0">
-    <label class="muted" style="display:flex;align-items:center;gap:6px">Classe:
-      <select id="filtroClasseRent" onchange="setFiltroClasse(this.value)">
-        <option value="">Todas</option>
-      </select>
-    </label>
-  </div>
+  <div class="ledger">
   <div class="tbl-scroll">
     <table id="tbl" style="table-layout:fixed">
       <thead><tr>
@@ -181,11 +226,13 @@
     <button onclick="addAtivo()">Adicionar ativo</button>
     <span class="muted">O valor base é puxado automaticamente do mês anterior.</span>
   </div>
+  </div>
 
   <h3 style="color:var(--muted);margin:26px 0 8px">Resumo do ano <span id="anoLabel"></span></h3>
   <table class="resumo-tab"><thead><tr id="resumoHead"></tr></thead><tbody id="resumoBody"></tbody></table>
 </div>
 
+<div class="group-label">Desempenho</div>
 <div class="charts">
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -200,12 +247,6 @@
       <select id="selAnoAcum" onchange="renderCharts()" style="font-size:11px;padding:3px 6px"></select>
     </h3>
     <div class="chart-wrap"><canvas id="chAcum"></canvas></div>
-  </div>
-
-  <div class="chartbox"><h3>Peso dos ativos em carteira</h3>
-    <div id="chPesoWrap" style="max-height:420px;overflow-y:auto">
-      <div id="chPesoInner"><canvas id="chPeso"></canvas></div>
-    </div>
   </div>
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -225,7 +266,15 @@
     </h3>
     <div class="chart-wrap"><canvas id="chAcumJanela"></canvas></div>
   </div>
+</div>
 
+<div class="group-label">Renda passiva</div>
+<div class="charts">
+  <div class="chartbox"><h3>Peso dos ativos em carteira</h3>
+    <div id="chPesoWrap" style="max-height:420px;overflow-y:auto">
+      <div id="chPesoInner"><canvas id="chPeso"></canvas></div>
+    </div>
+  </div>
   <div class="chartbox">
     <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span>Geração de Caixa + Proventos (mês a mês) <span class="muted" id="totalGerAno" style="font-weight:400"></span></span>
@@ -350,6 +399,11 @@ function classesAtuais(){ return ['', ...(MOEDA==='USD'?CLASSES_RENT_USD:CLASSES
 let MOEDA = 'BRL';
 const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => v==null ? '—' : (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+function pesoBarHTML(peso){
+  const pct = (peso*100).toFixed(1);
+  const w = Math.max(0,Math.min(100,peso*100));
+  return `<div class="peso-bar"><div class="track"><div class="fill" style="width:${w}%"></div></div><span class="muted">${pct}%</span></div>`;
+}
 function smartNum(s){
   s = String(s).replace(/[^\d.,-]/g,'');
   if(s.includes(',') && s.includes('.')){
@@ -679,7 +733,7 @@ function renderMes(){
         title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado. Enquanto não preencher, usamos o saldo anterior só por baixo dos panos pra calcular a rentabilidade — sem mostrar esse número aqui, já que numa renda variável ele pode ficar bem diferente do valor real.' : ''}"
         ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
       <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
-      <td class="muted">${(l.peso*100).toFixed(1)}%</td>
+      <td>${pesoBarHTML(l.peso)}</td>
       <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>
     </tr>`;
   }).join('');
@@ -962,7 +1016,7 @@ function atualizarColunasCalculadas(){
     const tds = tr.querySelectorAll('td');
     const tdRent = tds[8], tdPeso = tds[9];
     if(tdRent){ tdRent.className = l.rent>=0?'pos':'neg'; tdRent.textContent = PCT(l.rent); }
-    if(tdPeso){ tdPeso.textContent = (l.peso*100).toFixed(1)+'%'; }
+    if(tdPeso){ tdPeso.innerHTML = pesoBarHTML(l.peso); }
   });
 }
 async function addAtivo(){

@@ -184,7 +184,8 @@
     <button type="button" id="btnMoedaBRL" class="moeda-opt" onclick="setMoeda('BRL')">R$</button>
     <button type="button" id="btnMoedaUSD" class="moeda-opt" onclick="setMoeda('USD')">US$</button>
   </div>
-  <button class="nav-btn on" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+  <button class="nav-btn on" id="btnAbaLancamentos" onclick="mostrarAba('lancamentos')">📈 Rentabilidade</button>
+  <button class="nav-btn" id="btnAbaProventos" onclick="mostrarAba('proventos')">💰 Proventos por classe</button>
   <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
   <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
   <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
@@ -195,6 +196,7 @@
   </div>
 </header>
 
+<div id="viewLancamentos">
 <div class="stats" id="stats"></div>
 <div class="timeline">
   <div class="tabs" id="anoTabs"></div>
@@ -386,6 +388,54 @@
     </div>
   </div>
 </div>
+</div><!-- /viewLancamentos -->
+
+<div id="viewProventos" class="wrap" style="display:none">
+  <h3 style="color:var(--muted);margin:6px 0 8px">Proventos por classe</h3>
+  <p class="muted" style="margin:-4px 0 16px;font-size:12.5px;max-width:680px;line-height:1.5">
+    Escolha as classes (ou combine mais de uma) pra ver quanto cada uma te paga mês a mês e como
+    essa renda evoluiu com o tempo — ajuda a montar uma mistura de renda mais estável entre elas.
+  </p>
+  <div class="tabs" id="provClasses" style="margin-bottom:18px;flex-wrap:wrap"></div>
+
+  <div class="charts">
+    <div class="chartbox">
+      <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>Proventos por mês <span class="muted" id="provTotalAno" style="font-weight:400"></span></span>
+        <select id="selAnoProv" onchange="renderProventosClasse()" style="font-size:11px;padding:3px 6px"></select>
+      </h3>
+      <div class="chart-wrap"><canvas id="chProvMes"></canvas></div>
+    </div>
+    <div class="chartbox">
+      <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span>Evolução mensal por classe</span>
+        <select id="selJanelaProv" onchange="renderProventosClasse()" style="font-size:11px;padding:3px 6px">
+          <option value="">Tudo</option>
+          <option value="12">12 meses</option>
+          <option value="24">24 meses</option>
+          <option value="36">36 meses</option>
+          <option value="48">48 meses</option>
+          <option value="60">60 meses</option>
+        </select>
+      </h3>
+      <div class="chart-wrap"><canvas id="chProvEvolucao"></canvas></div>
+    </div>
+  </div>
+
+  <h3 style="color:var(--muted);margin:26px 0 8px;display:flex;align-items:center;gap:8px">
+    Resumo por classe <span class="muted" id="provResumoJanela" style="font-weight:400;font-size:11px"></span>
+  </h3>
+  <table class="resumo-tab">
+    <thead><tr>
+      <th style="text-align:left">Classe</th>
+      <th>Total no período</th>
+      <th>Média mensal</th>
+      <th>% do total</th>
+      <th title="Desvio em relação à média mensal, desde o primeiro provento dessa classe. Quanto menor, mais regular ela paga mês a mês.">Variação mês a mês</th>
+    </tr></thead>
+    <tbody id="provResumoBody"></tbody>
+  </table>
+</div>
 
 <script>
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -454,6 +504,138 @@ async function editarNome(id){
 
 let DET_HISTORICO = [];   // histórico completo do ativo atualmente aberto no modal
 let DET_JANELA = '';      // '' = tudo, ou nº de meses (12 a 120)
+
+let ABA = 'lancamentos';        // 'lancamentos' ou 'proventos' — qual aba está visível
+let PROV_CLASSES_SEL = null;    // Set de classes marcadas na aba Proventos; null = ainda não mexeu (mostra todas)
+const PROV_CORES = ['rgba(45,212,191,.85)','rgba(59,130,246,.85)','rgba(245,183,84,.85)',
+  'rgba(248,113,113,.85)','rgba(167,139,250,.85)','rgba(52,211,153,.85)','rgba(251,146,60,.85)',
+  'rgba(96,165,250,.85)','rgba(232,121,249,.85)','rgba(148,163,184,.85)'];
+function corClasse(classe, lista){ return PROV_CORES[Math.max(0,lista.indexOf(classe)) % PROV_CORES.length]; }
+
+function mostrarAba(aba){
+  ABA = aba;
+  document.getElementById('viewLancamentos').style.display = aba==='lancamentos' ? '' : 'none';
+  document.getElementById('viewProventos').style.display = aba==='proventos' ? '' : 'none';
+  document.getElementById('btnAbaLancamentos').classList.toggle('on', aba==='lancamentos');
+  document.getElementById('btnAbaProventos').classList.toggle('on', aba==='proventos');
+  if(aba==='proventos'){
+    popularSeletorAno('selAnoProv', false);
+    renderProventosClasse();
+  }
+}
+// todas as classes que existem nessa carteira, na ordem "oficial" da moeda atual
+function classesPresentesProv(){
+  const presentes = new Set((DATA.ativos||[]).map(a=>a.classe).filter(Boolean));
+  return classesAtuais().filter(c=>c && presentes.has(c));
+}
+function toggleClasseProv(c){
+  if(PROV_CLASSES_SEL===null) PROV_CLASSES_SEL = new Set(classesPresentesProv());
+  if(PROV_CLASSES_SEL.has(c)) PROV_CLASSES_SEL.delete(c); else PROV_CLASSES_SEL.add(c);
+  renderProventosClasse();
+}
+function selecionarTodasClasses(){
+  PROV_CLASSES_SEL = new Set(classesPresentesProv());
+  renderProventosClasse();
+}
+// soma de proventos por mês, quebrado por classe — junta o histórico completo (DATA.meses) com a
+// classe de cada ativo (DATA.ativos), já que o backend só manda o total geral por mês
+function provPorMesEClasse(){
+  const classeMap = {}; (DATA.ativos||[]).forEach(a=>classeMap[a.id]=a.classe||'');
+  const out = {};
+  Object.entries(DATA.meses).forEach(([k,m])=>{
+    const porClasse = {};
+    m.linhas.forEach(l=>{
+      const p = l.proventos||0;
+      if(!p) return;
+      const c = classeMap[l.ativo_id] || '';
+      porClasse[c] = (porClasse[c]||0) + p;
+    });
+    out[k] = porClasse;
+  });
+  return out;
+}
+function renderProventosClasse(){
+  const classes = classesPresentesProv();
+  if(PROV_CLASSES_SEL===null) PROV_CLASSES_SEL = new Set(classes);
+  document.getElementById('provClasses').innerHTML = classes.map(c=>{
+    const on = PROV_CLASSES_SEL.has(c);
+    const cor = corClasse(c,classes);
+    return `<span class="tab" style="cursor:pointer;${on?`background:${cor.replace(',.85)',',.18)')};color:${cor.replace(',.85)',',1)')};font-weight:700`:''}"
+      onclick="toggleClasseProv('${c.replace(/'/g,"\\'")}')">${c}</span>`;
+  }).join('') + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="selecionarTodasClasses()">Marcar todas</span>`;
+
+  if(!classes.length){
+    document.getElementById('provResumoBody').innerHTML =
+      `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Nenhum ativo com classe definida ainda — defina a classe de cada ativo na tabela de lançamentos.</td></tr>`;
+    document.getElementById('provTotalAno').textContent = '';
+    if(charts['chProvMes']) charts['chProvMes'].destroy();
+    if(charts['chProvEvolucao']) charts['chProvEvolucao'].destroy();
+    return;
+  }
+
+  const dados = provPorMesEClasse();
+  const selecionadas = classes.filter(c=>PROV_CLASSES_SEL.has(c));
+
+  // gráfico 1: proventos por mês (barras empilhadas), ano escolhido no seletor do próprio gráfico
+  const anoSel = parseInt(document.getElementById('selAnoProv').value) || ANO;
+  const totalAno = MESES.reduce((s,_,i)=>{
+    const porClasse = dados[mesKey(anoSel,i+1)]||{};
+    return s + selecionadas.reduce((s2,c)=>s2+(porClasse[c]||0),0);
+  },0);
+  document.getElementById('provTotalAno').textContent = selecionadas.length ? `· Total ${anoSel}: ${fmtMoedaChart(totalAno)}` : '';
+  mkChart('chProvMes',{type:'bar',data:{labels:MESES,datasets:selecionadas.map(c=>({
+      label:c, backgroundColor:corClasse(c,classes),
+      data: MESES.map((_,i)=>(dados[mesKey(anoSel,i+1)]||{})[c]||0)
+    }))},
+    options:{maintainAspectRatio:false,
+      plugins:{legend:{display:selecionadas.length>1,labels:{color:'#8a9bb0'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
+      scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
+        y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
+
+  // gráfico 2: evolução mensal por classe (linha), janela escolhível — mostra tendência/estabilidade
+  const janela = document.getElementById('selJanelaProv').value;
+  let chaves = Object.keys(DATA.meses).sort();
+  if(janela) chaves = chaves.slice(-parseInt(janela));
+  const labels2 = chaves.map(k=>{ const [a,m]=k.split('-'); return MESES[parseInt(m)-1]+'/'+a.slice(2); });
+  mkChart('chProvEvolucao',{type:'line',data:{labels:labels2,datasets:selecionadas.map(c=>({
+      label:c, borderColor:corClasse(c,classes), backgroundColor:corClasse(c,classes),
+      data: chaves.map(k=>(dados[k]||{})[c]||0), tension:.3, pointRadius:2, fill:false
+    }))},
+    options:{maintainAspectRatio:false,
+      plugins:{legend:{display:selecionadas.length>1,labels:{color:'#8a9bb0'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
+      scales:{x:{grid:GRID,ticks:{...TICKS,maxRotation:0,autoSkip:true}},
+        y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
+
+  // resumo por classe — usa a mesma janela do gráfico de evolução; "variação mês a mês" é o
+  // coeficiente de variação (desvio padrão / média) desde o primeiro mês em que a classe pagou
+  // algo, pra não penalizar posição nova. Quanto menor, mais regular ela paga todo mês.
+  document.getElementById('provResumoJanela').textContent = janela ? `(últimos ${janela} meses)` : '(todo o histórico)';
+  const linhas = classes.filter(c=>selecionadas.includes(c)).map(c=>{
+    let valores = chaves.map(k=>(dados[k]||{})[c]||0);
+    const i0 = valores.findIndex(v=>v>0);
+    if(i0>=0) valores = valores.slice(i0);
+    const total = valores.reduce((s,v)=>s+v,0);
+    const media = valores.length ? total/valores.length : 0;
+    let cv = null;
+    if(valores.length>=2 && media>0){
+      const variancia = valores.reduce((s,v)=>s+(v-media)**2,0)/valores.length;
+      cv = Math.sqrt(variancia)/media*100;
+    }
+    return {classe:c, total, media, cv};
+  });
+  const totalGeral = linhas.reduce((s,l)=>s+l.total,0);
+  linhas.sort((a,b)=>b.total-a.total);
+  document.getElementById('provResumoBody').innerHTML = linhas.length ? linhas.map(l=>`
+    <tr>
+      <td style="text-align:left"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${corClasse(l.classe,classes)};margin-right:6px"></span>${l.classe}</td>
+      <td>${BRL(l.total)}</td>
+      <td>${BRL(l.media)}</td>
+      <td>${totalGeral?(l.total/totalGeral*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%':'—'}</td>
+      <td>${l.cv!=null?l.cv.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%':'—'}</td>
+    </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Marque ao menos uma classe acima pra ver o resumo.</td></tr>`;
+}
 
 function dividendoNoPeriodo(fatia){
   if(!fatia.length) return 0;
@@ -607,6 +789,7 @@ async function carregarCarteiras(){
 async function trocarCarteira(){
   CID = parseInt(document.getElementById('selCarteira').value);
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  PROV_CLASSES_SEL = null; // outra carteira pode ter classes diferentes — volta a mostrar todas
   await load();
 }
 
@@ -650,6 +833,7 @@ function render(){
   popularSeletorAno('selAnoRet', false);
   popularSeletorAno('selAnoAcum', false);
   renderMes(); renderStats(); renderResumo(); renderCharts(); renderListaAtivosHist();
+  if(ABA==='proventos') renderProventosClasse();
 }
 function popularFiltroClasseRent(){
   const sel = document.getElementById('filtroClasseRent');
@@ -1074,6 +1258,7 @@ async function setMoeda(nova){
     await fetch('/api/carteira/'+CID+'/rent/moeda',{method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({moeda: nova})});
     MOEDA = nova;
+    PROV_CLASSES_SEL = null; // os nomes de classe mudam (Ações -> Stocks etc.) — volta a mostrar todas
     await load();
   } finally {
     btnBRL.disabled = false; btnUSD.disabled = false;

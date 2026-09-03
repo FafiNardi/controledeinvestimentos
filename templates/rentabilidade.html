@@ -496,10 +496,24 @@ function abrirDetalheAtivo(ativoId){
   const rentTotal = acum-1;
   const pctDividendo12 = dividendoNoPeriodo(historico.slice(-12));
 
+  // "Rentabilidade acumulada" (acima) é o retorno CAPITALIZADO mês a mês (time-weighted): cada mês
+  // pesa igual, não importa quanto dinheiro estava investido nele — por isso pode disparar bem acima
+  // do ganho real em reais quando os aportes cresceram ao longo do tempo (um mês de alta forte no
+  // início, com pouco dinheiro aplicado, capitaliza junto com os meses seguintes já bem investidos).
+  // "Retorno em R$" abaixo é a conta simples que o usuário faria na mão: tudo que voltou (resgates +
+  // saldo que ainda está no ativo hoje) menos tudo que foi aplicado (base inicial + aportes) — o
+  // ganho (ou perda) em dinheiro de verdade, ponderado pelo quanto e quando cada real entrou.
+  const totalAplicado = (primeiraBase||0) + totalAportes;
+  const saldoAtual = historico.length ? (historico[historico.length-1].final||0) : 0;
+  const ganhoReais = saldoAtual + totalResgates - totalAplicado;
+  const pctSimples = totalAplicado ? (ganhoReais/totalAplicado*100) : null;
+
   document.getElementById('detAtivoNome').textContent = '🔎 ' + ativo.nome;
   document.getElementById('detAtivoStats').innerHTML = `
     <div class="stat"><div class="k">% Dividendo (12 meses)</div><div class="v" style="color:var(--accent)">${pctDividendo12.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>
-    <div class="stat"><div class="k">Rentabilidade acumulada</div><div class="v ${rentTotal>=0?'pos':'neg'}">${historico.length?PCT(rentTotal):'—'}</div></div>
+    <div class="stat" title="Retorno capitalizado mês a mês (cada mês pesa igual, não importa o valor investido nele)"><div class="k">Rentabilidade acumulada</div><div class="v ${rentTotal>=0?'pos':'neg'}">${historico.length?PCT(rentTotal):'—'}</div></div>
+    <div class="stat" title="Tudo que voltou (resgates + saldo atual) menos tudo que foi aplicado (base inicial + aportes)"><div class="k">Retorno em R$</div><div class="v ${ganhoReais>=0?'pos':'neg'}">${historico.length?BRL(ganhoReais):'—'}</div></div>
+    <div class="stat" title="Retorno em R$ dividido pelo total aplicado — a conta simples, sem capitalização mês a mês"><div class="k">Retorno % s/ aplicado</div><div class="v ${pctSimples!=null&&pctSimples>=0?'pos':'neg'}">${pctSimples!=null?pctSimples.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%':'—'}</div></div>
     <div class="stat"><div class="k">Total investido</div><div class="v">${BRL(totalInvestido)}</div></div>
     <div class="stat"><div class="k">Total em dividendos</div><div class="v">${BRL(totalDividendos)}</div></div>
     <div class="stat"><div class="k">% dividendo s/ investido</div><div class="v" style="color:var(--accent)">${pctDividendo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>

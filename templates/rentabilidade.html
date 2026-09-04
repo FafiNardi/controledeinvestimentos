@@ -393,9 +393,19 @@
 <div id="viewProventos" class="wrap" style="display:none">
   <h3 style="color:var(--muted);margin:6px 0 8px">Proventos por classe</h3>
   <p class="muted" style="margin:-4px 0 16px;font-size:12.5px;max-width:680px;line-height:1.5">
-    Escolha as classes (ou combine mais de uma) pra ver quanto cada uma te paga mês a mês e como
-    essa renda evoluiu com o tempo — ajuda a montar uma mistura de renda mais estável entre elas.
+    Escolha as classes (ou os ativos) que quiser comparar, pra ver quanto cada um te gera mês a mês e
+    como essa renda evoluiu com o tempo — ajuda a montar uma mistura de renda mais estável entre elas.
   </p>
+
+  <div class="tabs" style="margin-bottom:2px">
+    <span class="tab" id="btnModoClasse" onclick="setModoProv('classe')">Por classe</span>
+    <span class="tab" id="btnModoAtivo" onclick="setModoProv('ativo')">Por ativo</span>
+    <span class="timeline-div" style="height:20px;margin:0 4px"></span>
+    <span class="tab" id="btnMetricaProventos" onclick="setMetricaProv('proventos')" title="Só o dinheiro pago à parte (dividendo, JCP, aluguel de FII...)">Proventos pagos</span>
+    <span class="tab" id="btnMetricaRendimento" onclick="setMetricaProv('rendimento')" title="Proventos pagos + o quanto o saldo cresceu além dos aportes — pega também o rendimento que fica embutido no saldo (comum em Caixa e Renda Fixa, que raramente pagam provento à parte)">Rendimento total</span>
+  </div>
+  <p class="muted" id="provMetricaExplicacao" style="margin:4px 0 16px;font-size:11.5px;max-width:680px;line-height:1.5"></p>
+
   <div class="tabs" id="provClasses" style="margin-bottom:18px;flex-wrap:wrap"></div>
 
   <div class="charts">
@@ -506,7 +516,10 @@ let DET_HISTORICO = [];   // histórico completo do ativo atualmente aberto no m
 let DET_JANELA = '';      // '' = tudo, ou nº de meses (12 a 120)
 
 let ABA = 'lancamentos';        // 'lancamentos' ou 'proventos' — qual aba está visível
-let PROV_CLASSES_SEL = null;    // Set de classes marcadas na aba Proventos; null = ainda não mexeu (mostra todas)
+let PROV_MODO = 'classe';       // 'classe' ou 'ativo' — como agrupar/escolher na aba Proventos
+let PROV_METRICA = 'proventos'; // 'proventos' (só o que foi pago à parte) ou 'rendimento' (inclui valorização embutida no saldo)
+let PROV_CLASSES_SEL = null;    // Set de classes marcadas (modo 'classe'); null = ainda não mexeu (mostra todas)
+let PROV_ATIVOS_SEL = null;     // Set de ativo_id marcados (modo 'ativo'); null = ainda não mexeu (mostra todos)
 const PROV_CORES = ['rgba(45,212,191,.85)','rgba(59,130,246,.85)','rgba(245,183,84,.85)',
   'rgba(248,113,113,.85)','rgba(167,139,250,.85)','rgba(52,211,153,.85)','rgba(251,146,60,.85)',
   'rgba(96,165,250,.85)','rgba(232,121,249,.85)','rgba(148,163,184,.85)'];
@@ -523,68 +536,122 @@ function mostrarAba(aba){
     renderProventosClasse();
   }
 }
+function setModoProv(m){ PROV_MODO = m; renderProventosClasse(); }
+function setMetricaProv(m){ PROV_METRICA = m; renderProventosClasse(); }
 // todas as classes que existem nessa carteira, na ordem "oficial" da moeda atual
 function classesPresentesProv(){
   const presentes = new Set((DATA.ativos||[]).map(a=>a.classe).filter(Boolean));
   return classesAtuais().filter(c=>c && presentes.has(c));
 }
+// todos os ativos que existem nessa carteira, ordenados por nome (id como string pra usar como chave)
+function ativosPresentesProv(){
+  return (DATA.ativos||[]).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'))
+    .map(a=>String(a.id));
+}
+function nomeAtivoProv(id){
+  const a = (DATA.ativos||[]).find(x=>String(x.id)===String(id));
+  return a ? a.nome : ('#'+id);
+}
+function chavesPresentesProv(){ return PROV_MODO==='ativo' ? ativosPresentesProv() : classesPresentesProv(); }
+function labelChaveProv(k){ return PROV_MODO==='ativo' ? nomeAtivoProv(k) : k; }
+// PROV_CLASSES_SEL/PROV_ATIVOS_SEL são "let" no topo do arquivo, então NÃO viram propriedades de
+// `window` (isso só acontece com "var") — daí os getters/setters em vez de indexar window[nome].
+function getProvSel(){ return PROV_MODO==='ativo' ? PROV_ATIVOS_SEL : PROV_CLASSES_SEL; }
+function setProvSel(novo){ if(PROV_MODO==='ativo') PROV_ATIVOS_SEL = novo; else PROV_CLASSES_SEL = novo; }
 function toggleClasseProv(c){
-  if(PROV_CLASSES_SEL===null) PROV_CLASSES_SEL = new Set(classesPresentesProv());
-  if(PROV_CLASSES_SEL.has(c)) PROV_CLASSES_SEL.delete(c); else PROV_CLASSES_SEL.add(c);
+  let sel = getProvSel();
+  if(sel===null){ sel = new Set(chavesPresentesProv()); setProvSel(sel); }
+  if(sel.has(c)) sel.delete(c); else sel.add(c);
   renderProventosClasse();
 }
 function selecionarTodasClasses(){
-  PROV_CLASSES_SEL = new Set(classesPresentesProv());
+  if(PROV_MODO==='ativo') PROV_ATIVOS_SEL = new Set(chavesPresentesProv());
+  else PROV_CLASSES_SEL = new Set(chavesPresentesProv());
   renderProventosClasse();
 }
-// soma de proventos por mês, quebrado por classe — junta o histórico completo (DATA.meses) com a
-// classe de cada ativo (DATA.ativos), já que o backend só manda o total geral por mês
-function provPorMesEClasse(){
-  const classeMap = {}; (DATA.ativos||[]).forEach(a=>classeMap[a.id]=a.classe||'');
+// valor gerado por uma linha (ativo x mês): 'proventos' é só o que foi pago à parte (dividendo,
+// JCP, aluguel de FII...); 'rendimento' soma também o quanto o saldo cresceu além do que foi
+// aportado — pega o ganho que fica embutido no saldo (típico de Caixa/Renda Fixa, que raramente
+// distribuem provento à parte: o "juro" delas normalmente é só o saldo subindo sozinho).
+function valorLinhaProv(l, metrica){
+  if(metrica==='rendimento') return (l.final||0) + (l.resgate||0) + (l.proventos||0) - (l.base||0) - (l.aporte||0);
+  return l.proventos||0;
+}
+// soma por mês, quebrado por ativo — junta o histórico completo (DATA.meses) com cada ativo
+function provPorMesEAtivo(metrica){
   const out = {};
   Object.entries(DATA.meses).forEach(([k,m])=>{
-    const porClasse = {};
+    const porAtivo = {};
     m.linhas.forEach(l=>{
-      const p = l.proventos||0;
-      if(!p) return;
-      const c = classeMap[l.ativo_id] || '';
-      porClasse[c] = (porClasse[c]||0) + p;
+      const v = valorLinhaProv(l, metrica);
+      if(!v) return;
+      porAtivo[l.ativo_id] = (porAtivo[l.ativo_id]||0) + v;
+    });
+    out[k] = porAtivo;
+  });
+  return out;
+}
+// mesmo resultado, mas agregado por classe em vez de por ativo
+function provPorMesEClasse(metrica){
+  const classeMap = {}; (DATA.ativos||[]).forEach(a=>classeMap[a.id]=a.classe||'');
+  const porAtivo = provPorMesEAtivo(metrica);
+  const out = {};
+  Object.entries(porAtivo).forEach(([k,porA])=>{
+    const porClasse = {};
+    Object.entries(porA).forEach(([aid,v])=>{
+      const c = classeMap[aid] || '';
+      porClasse[c] = (porClasse[c]||0) + v;
     });
     out[k] = porClasse;
   });
   return out;
 }
 function renderProventosClasse(){
-  const classes = classesPresentesProv();
-  if(PROV_CLASSES_SEL===null) PROV_CLASSES_SEL = new Set(classes);
-  document.getElementById('provClasses').innerHTML = classes.map(c=>{
-    const on = PROV_CLASSES_SEL.has(c);
-    const cor = corClasse(c,classes);
+  document.getElementById('btnModoClasse').classList.toggle('on', PROV_MODO==='classe');
+  document.getElementById('btnModoAtivo').classList.toggle('on', PROV_MODO==='ativo');
+  document.getElementById('btnMetricaProventos').classList.toggle('on', PROV_METRICA==='proventos');
+  document.getElementById('btnMetricaRendimento').classList.toggle('on', PROV_METRICA==='rendimento');
+  document.getElementById('provMetricaExplicacao').textContent = PROV_METRICA==='rendimento'
+    ? 'Mostrando o rendimento total: proventos pagos + o quanto o saldo cresceu além dos aportes. É o que revela a "geração de caixa" de classes como Caixa e Renda Fixa, que normalmente não pagam nada à parte.'
+    : 'Mostrando só o que foi efetivamente pago à parte (dividendo, JCP, aluguel de FII...). Caixa e Renda Fixa costumam ficar em R$ 0,00 aqui, porque o rendimento delas geralmente fica embutido no saldo — troque para "Rendimento total" pra ver esse valor.';
+
+  const chaves = chavesPresentesProv();
+  // só "consome" o sentinel null quando já há classes/ativos pra marcar — senão uma chamada
+  // que pegue os dados ainda vazios (ex.: alguma corrida de carregamento) travaria a seleção
+  // vazia pra sempre, mesmo depois dos dados chegarem
+  let sel = getProvSel();
+  if(sel===null && chaves.length){ sel = new Set(chaves); setProvSel(sel); }
+  sel = sel || new Set();
+  document.getElementById('provClasses').innerHTML = chaves.map(c=>{
+    const on = sel.has(c);
+    const cor = corClasse(c,chaves);
     return `<span class="tab" style="cursor:pointer;${on?`background:${cor.replace(',.85)',',.18)')};color:${cor.replace(',.85)',',1)')};font-weight:700`:''}"
-      onclick="toggleClasseProv('${c.replace(/'/g,"\\'")}')">${c}</span>`;
+      onclick="toggleClasseProv('${String(c).replace(/'/g,"\\'")}')">${labelChaveProv(c)}</span>`;
   }).join('') + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="selecionarTodasClasses()">Marcar todas</span>`;
 
-  if(!classes.length){
+  if(!chaves.length){
+    const msg = PROV_MODO==='ativo' ? 'Nenhum ativo cadastrado ainda.'
+      : 'Nenhum ativo com classe definida ainda — defina a classe de cada ativo na tabela de lançamentos.';
     document.getElementById('provResumoBody').innerHTML =
-      `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Nenhum ativo com classe definida ainda — defina a classe de cada ativo na tabela de lançamentos.</td></tr>`;
+      `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">${msg}</td></tr>`;
     document.getElementById('provTotalAno').textContent = '';
     if(charts['chProvMes']) charts['chProvMes'].destroy();
     if(charts['chProvEvolucao']) charts['chProvEvolucao'].destroy();
     return;
   }
 
-  const dados = provPorMesEClasse();
-  const selecionadas = classes.filter(c=>PROV_CLASSES_SEL.has(c));
+  const dados = PROV_MODO==='ativo' ? provPorMesEAtivo(PROV_METRICA) : provPorMesEClasse(PROV_METRICA);
+  const selecionadas = chaves.filter(c=>sel.has(c));
 
   // gráfico 1: proventos por mês (barras empilhadas), ano escolhido no seletor do próprio gráfico
   const anoSel = parseInt(document.getElementById('selAnoProv').value) || ANO;
   const totalAno = MESES.reduce((s,_,i)=>{
-    const porClasse = dados[mesKey(anoSel,i+1)]||{};
-    return s + selecionadas.reduce((s2,c)=>s2+(porClasse[c]||0),0);
+    const porChave = dados[mesKey(anoSel,i+1)]||{};
+    return s + selecionadas.reduce((s2,c)=>s2+(porChave[c]||0),0);
   },0);
   document.getElementById('provTotalAno').textContent = selecionadas.length ? `· Total ${anoSel}: ${fmtMoedaChart(totalAno)}` : '';
   mkChart('chProvMes',{type:'bar',data:{labels:MESES,datasets:selecionadas.map(c=>({
-      label:c, backgroundColor:corClasse(c,classes),
+      label:labelChaveProv(c), backgroundColor:corClasse(c,chaves),
       data: MESES.map((_,i)=>(dados[mesKey(anoSel,i+1)]||{})[c]||0)
     }))},
     options:{maintainAspectRatio:false,
@@ -593,14 +660,14 @@ function renderProventosClasse(){
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
         y:{stacked:true,grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
 
-  // gráfico 2: evolução mensal por classe (linha), janela escolhível — mostra tendência/estabilidade
+  // gráfico 2: evolução mensal (linha), janela escolhível — mostra tendência/estabilidade
   const janela = document.getElementById('selJanelaProv').value;
-  let chaves = Object.keys(DATA.meses).sort();
-  if(janela) chaves = chaves.slice(-parseInt(janela));
-  const labels2 = chaves.map(k=>{ const [a,m]=k.split('-'); return MESES[parseInt(m)-1]+'/'+a.slice(2); });
+  let chavesMes = Object.keys(DATA.meses).sort();
+  if(janela) chavesMes = chavesMes.slice(-parseInt(janela));
+  const labels2 = chavesMes.map(k=>{ const [a,m]=k.split('-'); return MESES[parseInt(m)-1]+'/'+a.slice(2); });
   mkChart('chProvEvolucao',{type:'line',data:{labels:labels2,datasets:selecionadas.map(c=>({
-      label:c, borderColor:corClasse(c,classes), backgroundColor:corClasse(c,classes),
-      data: chaves.map(k=>(dados[k]||{})[c]||0), tension:.3, pointRadius:2, fill:false
+      label:labelChaveProv(c), borderColor:corClasse(c,chaves), backgroundColor:corClasse(c,chaves),
+      data: chavesMes.map(k=>(dados[k]||{})[c]||0), tension:.3, pointRadius:2, fill:false
     }))},
     options:{maintainAspectRatio:false,
       plugins:{legend:{display:selecionadas.length>1,labels:{color:'#8a9bb0'}},
@@ -608,12 +675,12 @@ function renderProventosClasse(){
       scales:{x:{grid:GRID,ticks:{...TICKS,maxRotation:0,autoSkip:true}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtMoedaChart}}}}});
 
-  // resumo por classe — usa a mesma janela do gráfico de evolução; "variação mês a mês" é o
-  // coeficiente de variação (desvio padrão / média) desde o primeiro mês em que a classe pagou
-  // algo, pra não penalizar posição nova. Quanto menor, mais regular ela paga todo mês.
+  // resumo — usa a mesma janela do gráfico de evolução; "variação mês a mês" é o coeficiente de
+  // variação (desvio padrão / média) desde o primeiro mês em que a chave gerou algo, pra não
+  // penalizar posição nova. Quanto menor, mais regular ela gera todo mês.
   document.getElementById('provResumoJanela').textContent = janela ? `(últimos ${janela} meses)` : '(todo o histórico)';
-  const linhas = classes.filter(c=>selecionadas.includes(c)).map(c=>{
-    let valores = chaves.map(k=>(dados[k]||{})[c]||0);
+  const linhas = chaves.filter(c=>selecionadas.includes(c)).map(c=>{
+    let valores = chavesMes.map(k=>(dados[k]||{})[c]||0);
     const i0 = valores.findIndex(v=>v>0);
     if(i0>=0) valores = valores.slice(i0);
     const total = valores.reduce((s,v)=>s+v,0);
@@ -623,18 +690,18 @@ function renderProventosClasse(){
       const variancia = valores.reduce((s,v)=>s+(v-media)**2,0)/valores.length;
       cv = Math.sqrt(variancia)/media*100;
     }
-    return {classe:c, total, media, cv};
+    return {chave:c, total, media, cv};
   });
   const totalGeral = linhas.reduce((s,l)=>s+l.total,0);
   linhas.sort((a,b)=>b.total-a.total);
   document.getElementById('provResumoBody').innerHTML = linhas.length ? linhas.map(l=>`
     <tr>
-      <td style="text-align:left"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${corClasse(l.classe,classes)};margin-right:6px"></span>${l.classe}</td>
+      <td style="text-align:left"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${corClasse(l.chave,chaves)};margin-right:6px"></span>${labelChaveProv(l.chave)}</td>
       <td>${BRL(l.total)}</td>
       <td>${BRL(l.media)}</td>
       <td>${totalGeral?(l.total/totalGeral*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%':'—'}</td>
       <td>${l.cv!=null?l.cv.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%':'—'}</td>
-    </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Marque ao menos uma classe acima pra ver o resumo.</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">Marque ao menos um item acima pra ver o resumo.</td></tr>`;
 }
 
 function dividendoNoPeriodo(fatia){
@@ -789,7 +856,7 @@ async function carregarCarteiras(){
 async function trocarCarteira(){
   CID = parseInt(document.getElementById('selCarteira').value);
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
-  PROV_CLASSES_SEL = null; // outra carteira pode ter classes diferentes — volta a mostrar todas
+  PROV_CLASSES_SEL = null; PROV_ATIVOS_SEL = null; // outra carteira pode ter classes/ativos diferentes — volta a mostrar todos
   await load();
 }
 
@@ -1357,7 +1424,10 @@ function makeResizable(){
 
 document.getElementById('btnTema').textContent =
   document.documentElement.getAttribute('data-theme')==='light' ? '☀️' : '🌙';
-carregarCarteiras();
+carregarCarteiras().then(()=>{
+  // permite abrir direto na aba Proventos por classe a partir de outra página, ex: /rentabilidade?aba=proventos
+  if(new URLSearchParams(location.search).get('aba')==='proventos') mostrarAba('proventos');
+});
 makeResizable();
 </script>
 </body>

@@ -232,7 +232,6 @@
 
   <h3 style="color:var(--muted);margin:26px 0 8px">Resumo do ano <span id="anoLabel"></span></h3>
   <table class="resumo-tab"><thead><tr id="resumoHead"></tr></thead><tbody id="resumoBody"></tbody></table>
-</div>
 
 <div class="group-label">Desempenho</div>
 <div class="charts">
@@ -532,7 +531,7 @@ function mostrarAba(aba){
   document.getElementById('btnAbaLancamentos').classList.toggle('on', aba==='lancamentos');
   document.getElementById('btnAbaProventos').classList.toggle('on', aba==='proventos');
   if(aba==='proventos'){
-    popularSeletorAno('selAnoProv', false);
+    popularSeletorAno('selAnoProv', true);
     renderProventosClasse();
   }
 }
@@ -644,15 +643,26 @@ function renderProventosClasse(){
   const selecionadas = chaves.filter(c=>sel.has(c));
 
   // gráfico 1: proventos por mês (barras empilhadas), ano escolhido no seletor do próprio gráfico
-  const anoSel = parseInt(document.getElementById('selAnoProv').value) || ANO;
-  const totalAno = MESES.reduce((s,_,i)=>{
-    const porChave = dados[mesKey(anoSel,i+1)]||{};
-    return s + selecionadas.reduce((s2,c)=>s2+(porChave[c]||0),0);
-  },0);
-  document.getElementById('provTotalAno').textContent = selecionadas.length ? `· Total ${anoSel}: ${fmtMoedaChart(totalAno)}` : '';
-  mkChart('chProvMes',{type:'bar',data:{labels:MESES,datasets:selecionadas.map(c=>({
+  // — ou "Tudo" (value vazio), que junta o histórico inteiro num total por ANO, pra dar uma visão
+  // geral desde o começo sem precisar ir passando ano a ano
+  const anoSelRaw = document.getElementById('selAnoProv').value;
+  const modoTudoAno = anoSelRaw === '';
+  let labels1, dados1;
+  if(modoTudoAno){
+    const anos = [...new Set(Object.keys(DATA.meses).map(k=>k.slice(0,4)))].sort();
+    labels1 = anos;
+    dados1 = c => anos.map(a => MESES.reduce((s,_,i)=>s+((dados[mesKey(parseInt(a),i+1)]||{})[c]||0),0));
+  } else {
+    const anoSel = parseInt(anoSelRaw) || ANO;
+    labels1 = MESES;
+    dados1 = c => MESES.map((_,i)=>(dados[mesKey(anoSel,i+1)]||{})[c]||0);
+  }
+  const totalAno = labels1.reduce((s,_,i)=>s+selecionadas.reduce((s2,c)=>s2+dados1(c)[i],0),0);
+  document.getElementById('provTotalAno').textContent = selecionadas.length
+    ? `· Total ${modoTudoAno?'no período':anoSelRaw}: ${fmtMoedaChart(totalAno)}` : '';
+  mkChart('chProvMes',{type:'bar',data:{labels:labels1,datasets:selecionadas.map(c=>({
       label:labelChaveProv(c), backgroundColor:corClasse(c,chaves),
-      data: MESES.map((_,i)=>(dados[mesKey(anoSel,i+1)]||{})[c]||0)
+      data: dados1(c)
     }))},
     options:{maintainAspectRatio:false,
       plugins:{legend:{display:selecionadas.length>1,labels:{color:'#8a9bb0'}},

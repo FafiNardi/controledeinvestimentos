@@ -523,6 +523,21 @@ const PROV_CORES = ['rgba(45,212,191,.85)','rgba(59,130,246,.85)','rgba(245,183,
   'rgba(248,113,113,.85)','rgba(167,139,250,.85)','rgba(52,211,153,.85)','rgba(251,146,60,.85)',
   'rgba(96,165,250,.85)','rgba(232,121,249,.85)','rgba(148,163,184,.85)'];
 function corClasse(classe, lista){ return PROV_CORES[Math.max(0,lista.indexOf(classe)) % PROV_CORES.length]; }
+const PROV_COR_SEM_CLASSE = 'rgba(148,163,184,.85)'; // mesmo sufixo ,.85) das outras, pro highlight do chip continuar funcionando
+// cor de uma "chave" na aba Proventos: no modo por classe, cada classe tem sua cor (por posição
+// na lista oficial). No modo por ativo, a cor vem da CLASSE do ativo (não da posição dele na
+// lista) — assim todo FII fica com a mesma cor, toda Ação com a mesma cor etc., o que deixa mais
+// fácil enxergar/selecionar ativos da mesma classe mesmo estando no modo por ativo.
+function corChaveProv(c, lista){
+  if(PROV_MODO!=='ativo') return corClasse(c, lista);
+  const classe = classeDoAtivoProv(c);
+  if(!classe) return PROV_COR_SEM_CLASSE;
+  return corClasse(classe, classesPresentesProv());
+}
+function classeDoAtivoProv(id){
+  const a = (DATA.ativos||[]).find(x=>String(x.id)===String(id));
+  return a ? (a.classe||'') : '';
+}
 
 function mostrarAba(aba){
   ABA = aba;
@@ -647,7 +662,7 @@ function renderProventosClasse(){
   sel = sel || new Set();
   document.getElementById('provClasses').innerHTML = chaves.map(c=>{
     const on = sel.has(c);
-    const cor = corClasse(c,chaves);
+    const cor = corChaveProv(c,chaves);
     return `<span class="tab" style="cursor:pointer;${on?`background:${cor.replace(',.85)',',.18)')};color:${cor.replace(',.85)',',1)')};font-weight:700`:''}"
       onclick="toggleClasseProv('${String(c).replace(/'/g,"\\'")}')">${labelChaveProv(c)}</span>`;
   }).join('') + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="selecionarTodasClasses()">Marcar todas</span>`
@@ -686,7 +701,7 @@ function renderProventosClasse(){
   document.getElementById('provTotalAno').textContent = selecionadas.length
     ? `· Total ${modoTudoAno?'no período':anoSelRaw}: ${fmtMoedaChart(totalAno)}` : '';
   mkChart('chProvMes',{type:'bar',data:{labels:labels1,datasets:selecionadas.map(c=>({
-      label:labelChaveProv(c), backgroundColor:corClasse(c,chaves),
+      label:labelChaveProv(c), backgroundColor:corChaveProv(c,chaves),
       data: dados1(c)
     }))},
     options:{maintainAspectRatio:false,
@@ -701,7 +716,7 @@ function renderProventosClasse(){
   if(janela) chavesMes = chavesMes.slice(-parseInt(janela));
   const labels2 = chavesMes.map(k=>{ const [a,m]=k.split('-'); return MESES[parseInt(m)-1]+'/'+a.slice(2); });
   mkChart('chProvEvolucao',{type:'line',data:{labels:labels2,datasets:selecionadas.map(c=>({
-      label:labelChaveProv(c), borderColor:corClasse(c,chaves), backgroundColor:corClasse(c,chaves),
+      label:labelChaveProv(c), borderColor:corChaveProv(c,chaves), backgroundColor:corChaveProv(c,chaves),
       data: chavesMes.map(k=>(dados[k]||{})[c]||0), tension:.3, pointRadius:2, fill:false
     }))},
     options:{maintainAspectRatio:false,
@@ -731,7 +746,7 @@ function renderProventosClasse(){
   linhas.sort((a,b)=>b.total-a.total);
   document.getElementById('provResumoBody').innerHTML = linhas.length ? linhas.map(l=>`
     <tr>
-      <td style="text-align:left"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${corClasse(l.chave,chaves)};margin-right:6px"></span>${labelChaveProv(l.chave)}</td>
+      <td style="text-align:left"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${corChaveProv(l.chave,chaves)};margin-right:6px"></span>${labelChaveProv(l.chave)}</td>
       <td>${BRL(l.total)}</td>
       <td>${BRL(l.media)}</td>
       <td>${totalGeral?(l.total/totalGeral*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%':'—'}</td>

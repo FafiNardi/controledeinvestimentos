@@ -557,15 +557,39 @@ function labelChaveProv(k){ return PROV_MODO==='ativo' ? nomeAtivoProv(k) : k; }
 // `window` (isso só acontece com "var") — daí os getters/setters em vez de indexar window[nome].
 function getProvSel(){ return PROV_MODO==='ativo' ? PROV_ATIVOS_SEL : PROV_CLASSES_SEL; }
 function setProvSel(novo){ if(PROV_MODO==='ativo') PROV_ATIVOS_SEL = novo; else PROV_CLASSES_SEL = novo; }
+// lembra a última seleção de classes/ativos do usuário nessa carteira, pra não abrir sempre com
+// tudo marcado de novo — guardado por carteira (cada uma pode ter classes/ativos diferentes) e
+// por modo (a seleção de classes é independente da seleção de ativos)
+function chaveStorageProv(modo){ return `provSel_${CID}_${modo}`; }
+function carregarSelecaoProv(){
+  const lerModo = (modo) => {
+    try{
+      const salvo = JSON.parse(localStorage.getItem(chaveStorageProv(modo)));
+      return Array.isArray(salvo) ? new Set(salvo) : null;
+    }catch(e){ return null; }
+  };
+  PROV_CLASSES_SEL = lerModo('classe');
+  PROV_ATIVOS_SEL = lerModo('ativo');
+}
+function salvarSelecaoProv(){
+  const sel = getProvSel();
+  if(sel) localStorage.setItem(chaveStorageProv(PROV_MODO), JSON.stringify([...sel]));
+}
 function toggleClasseProv(c){
   let sel = getProvSel();
   if(sel===null){ sel = new Set(chavesPresentesProv()); setProvSel(sel); }
   if(sel.has(c)) sel.delete(c); else sel.add(c);
+  salvarSelecaoProv();
   renderProventosClasse();
 }
 function selecionarTodasClasses(){
-  if(PROV_MODO==='ativo') PROV_ATIVOS_SEL = new Set(chavesPresentesProv());
-  else PROV_CLASSES_SEL = new Set(chavesPresentesProv());
+  setProvSel(new Set(chavesPresentesProv()));
+  salvarSelecaoProv();
+  renderProventosClasse();
+}
+function desmarcarTodasClasses(){
+  setProvSel(new Set());
+  salvarSelecaoProv();
   renderProventosClasse();
 }
 // valor gerado por uma linha (ativo x mês): 'proventos' é só o que foi pago à parte (dividendo,
@@ -626,7 +650,8 @@ function renderProventosClasse(){
     const cor = corClasse(c,chaves);
     return `<span class="tab" style="cursor:pointer;${on?`background:${cor.replace(',.85)',',.18)')};color:${cor.replace(',.85)',',1)')};font-weight:700`:''}"
       onclick="toggleClasseProv('${String(c).replace(/'/g,"\\'")}')">${labelChaveProv(c)}</span>`;
-  }).join('') + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="selecionarTodasClasses()">Marcar todas</span>`;
+  }).join('') + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="selecionarTodasClasses()">Marcar todas</span>`
+    + `<span class="tab" style="cursor:pointer;opacity:.65" onclick="desmarcarTodasClasses()">Desmarcar todas</span>`;
 
   if(!chaves.length){
     const msg = PROV_MODO==='ativo' ? 'Nenhum ativo cadastrado ainda.'
@@ -866,11 +891,11 @@ async function carregarCarteiras(){
 async function trocarCarteira(){
   CID = parseInt(document.getElementById('selCarteira').value);
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
-  PROV_CLASSES_SEL = null; PROV_ATIVOS_SEL = null; // outra carteira pode ter classes/ativos diferentes — volta a mostrar todos
   await load();
 }
 
 async function load(){
+  carregarSelecaoProv(); // busca a seleção de classes/ativos salva pra essa carteira (ou null = ainda não mexeu, mostra tudo)
   const r = await fetch('/api/carteira/'+CID+'/rent');
   DATA = await r.json();
   EDIT = DATA.editavel;
@@ -1335,7 +1360,9 @@ async function setMoeda(nova){
     await fetch('/api/carteira/'+CID+'/rent/moeda',{method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({moeda: nova})});
     MOEDA = nova;
-    PROV_CLASSES_SEL = null; // os nomes de classe mudam (Ações -> Stocks etc.) — volta a mostrar todas
+    // os nomes de classe mudam (Ações -> Stocks etc.), então a seleção salva não bate mais —
+    // limpa o que tava guardado pra essa carteira em vez de deixar o load() restaurar nomes velhos
+    localStorage.removeItem(chaveStorageProv('classe'));
     await load();
   } finally {
     btnBRL.disabled = false; btnUSD.disabled = false;

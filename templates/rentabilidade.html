@@ -704,11 +704,12 @@ function renderProventosClasse(){
   const totalAno = labels1.reduce((s,_,i)=>s+selecionadas.reduce((s2,c)=>s2+dados1(c)[i],0),0);
   document.getElementById('provTotalAno').textContent = selecionadas.length
     ? `· Total ${modoTudoAno?'no período':anoSelRaw}: ${fmtMoedaChart(totalAno)}` : '';
-  mkChart('chProvMes',{type:'bar',data:{labels:labels1,datasets:selecionadas.map(c=>({
+  mkChart('chProvMes',{type:'bar',plugins:[PLUGIN_TOTAL_BARRA],data:{labels:labels1,datasets:selecionadas.map(c=>({
       label:labelChaveProv(c), backgroundColor:corChaveProv(c,chaves),
       data: dados1(c)
     }))},
     options:{maintainAspectRatio:false,
+      layout:{padding:{top:18}}, // espaço pro total desenhado em cima de cada barra
       plugins:{legend:{display:selecionadas.length>1,labels:{color:'#8a9bb0'}},
         tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtMoedaChart(ctx.parsed.y)}`}}},
       scales:{x:{stacked:true,grid:GRID,ticks:TICKS},
@@ -1152,6 +1153,31 @@ const GRID = {color:'rgba(255,255,255,.06)'};
 const TICKS = {color:'#8a9bb0'};
 const fmtPctChart = v => (v==null?0:v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
 const fmtMoedaChart = v => BRL(v==null?0:v);
+// plugin genérico pra gráfico de barras empilhadas: escreve o total (soma de todas as classes/
+// ativos daquela barra) em cima dela, pra não precisar somar os pedaços coloridos de cabeça
+const PLUGIN_TOTAL_BARRA = {
+  id: 'totalBarra',
+  afterDatasetsDraw(chart){
+    const {ctx, data, scales} = chart;
+    if(!scales.x || !scales.y || !data.labels.length) return;
+    ctx.save();
+    ctx.font = '11px -apple-system,BlinkMacSystemFont,sans-serif';
+    ctx.fillStyle = '#c9d4e0';
+    ctx.textAlign = 'center';
+    data.labels.forEach((_,i)=>{
+      let total = 0;
+      chart.data.datasets.forEach((ds,dsIndex)=>{
+        if(chart.getDatasetMeta(dsIndex).hidden) return;
+        total += ds.data[i]||0;
+      });
+      if(!total) return;
+      const xPix = scales.x.getPixelForValue(i);
+      const yPix = scales.y.getPixelForValue(total);
+      ctx.fillText(fmtMoedaChart(total), xPix, yPix - 6);
+    });
+    ctx.restore();
+  }
+};
 
 function renderCharts(){
   // 1. retorno mês a mês do ano — usa o ano escolhido no seletor do próprio gráfico

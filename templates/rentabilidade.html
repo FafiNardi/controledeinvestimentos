@@ -410,7 +410,7 @@
   <div class="charts">
     <div class="chartbox">
       <h3 style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span>Proventos por mês <span class="muted" id="provTotalAno" style="font-weight:400"></span></span>
+        <span><span id="provTituloMes">Proventos por mês</span> <span class="muted" id="provTotalAno" style="font-weight:400"></span></span>
         <select id="selAnoProv" onchange="renderProventosClasse()" style="font-size:11px;padding:3px 6px"></select>
       </h3>
       <div class="chart-wrap"><canvas id="chProvMes"></canvas></div>
@@ -650,8 +650,12 @@ function renderProventosClasse(){
   document.getElementById('btnMetricaProventos').classList.toggle('on', PROV_METRICA==='proventos');
   document.getElementById('btnMetricaRendimento').classList.toggle('on', PROV_METRICA==='rendimento');
   document.getElementById('provMetricaExplicacao').textContent = PROV_METRICA==='rendimento'
-    ? 'Mostrando o rendimento total: proventos pagos + o quanto o saldo cresceu além dos aportes. É o que revela a "geração de caixa" de classes como Caixa e Renda Fixa, que normalmente não pagam nada à parte.'
+    ? 'Mostrando o rendimento total: proventos pagos + o quanto o saldo cresceu além dos aportes. É o que revela a "geração de caixa" de classes como Caixa e Renda Fixa, que normalmente não pagam nada à parte. Como inclui a variação do saldo, pode ficar negativo num período em que o preço caiu mais do que o provento pago.'
     : 'Mostrando só o que foi efetivamente pago à parte (dividendo, JCP, aluguel de FII...). Caixa e Renda Fixa costumam ficar em R$ 0,00 aqui, porque o rendimento delas geralmente fica embutido no saldo — troque para "Rendimento total" pra ver esse valor.';
+  // título do gráfico acompanha a métrica escolhida — evita a confusão de ver "Proventos por mês"
+  // negativo quando na verdade é o Rendimento total (que inclui queda de preço) que está negativo
+  document.getElementById('provTituloMes').textContent = PROV_METRICA==='rendimento'
+    ? 'Rendimento total por mês' : 'Proventos por mês';
 
   const chaves = chavesPresentesProv();
   // só "consome" o sentinel null quando já há classes/ativos pra marcar — senão uma chamada

@@ -380,6 +380,18 @@ def api_state(cid):
 def api_delete_carteira(cid):
     c = get_carteira_or_404(cid)
     require_owner(c)
+    # Antes isso era só "db.session.delete(c)", deixando o SQLAlchemy cascatear via ORM: carrega
+    # CADA RentAtivo e CADA RentMov como objeto Python antes de apagar um por um. Numa carteira
+    # pequena não dá pra notar, mas numa com anos de histórico isso empilha milhares de objetos na
+    # memória de uma vez — no plano free do Render (512 MB) isso derrubou o worker (OOM/SIGKILL) na
+    # hora de excluir a carteira "Teste - Rafael". Trocado por DELETE em lote (uma consulta só por
+    # tabela, sem carregar linha nenhuma como objeto Python).
+    ativo_ids = [row[0] for row in RentAtivo.query.filter_by(carteira_id=cid)
+                 .with_entities(RentAtivo.id).all()]
+    if ativo_ids:
+        RentMov.query.filter(RentMov.ativo_id.in_(ativo_ids)).delete(synchronize_session=False)
+    RentAtivo.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
+    Asset.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     db.session.delete(c)
     db.session.commit()
     return jsonify({"ok": True})

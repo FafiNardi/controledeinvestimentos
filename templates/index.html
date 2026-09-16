@@ -127,6 +127,7 @@
   <span id="filtroInfo" class="muted"></span>
   <button class="ghost" id="btnCopiarRent" onclick="copiarDaRentabilidade()" style="margin-left:auto"
     title="Traz pra cá os ativos já cadastrados na Rentabilidade dessa carteira">📈→⚖️ Copiar da Rentabilidade</button>
+  <span id="statusCopiar" class="muted"></span>
   <button class="ghost" onclick="limparOrdem()">↕ Limpar ordenação</button>
 </div>
 
@@ -495,14 +496,19 @@ async function copiarDaRentabilidade(){
   if(!confirm(`Copiar ${faltando.length} ativo(s) da Rentabilidade pro Rebalanceamento?\n\n`+
     faltando.map(a=>`• ${a.nome}${a.classe?' ('+a.classe+')':''}`).join('\n')+
     `\n\nEles entram com % ideal em 0 — você ajusta depois.`)) return;
-  const st = document.getElementById('status'); st.textContent = 'copiando ativos...';
-  for(const a of faltando){
-    await fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker: a.nome.trim(), classe: a.classe||'', manual:1})});
-  }
-  st.textContent = '';
+  // feedback bem ao lado do botão (o #status lá do cabeçalho é longe demais — dava a impressão de
+  // que nada tinha acontecido) + botão desabilitado enquanto roda, pra não dar duplo-clique
+  const btn = document.getElementById('btnCopiarRent'), st = document.getElementById('statusCopiar');
+  btn.disabled = true;
+  st.textContent = `copiando ${faltando.length} ativo(s)...`;
+  // em paralelo — são só inserções simples (manual:1 não busca cotação), não precisa ser sequencial
+  await Promise.all(faltando.map(a =>
+    fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker: a.nome.trim(), classe: a.classe||'', manual:1})})));
   await load();
-  alert(`${faltando.length} ativo(s) copiado(s). Agora é só ajustar o % ideal de cada um.`);
+  btn.disabled = false;
+  st.textContent = `✓ ${faltando.length} copiado(s)`;
+  setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 5000);
 }
 async function refresh(){
   if(!CID) return;

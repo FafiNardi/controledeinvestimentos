@@ -160,6 +160,10 @@ class OpcaoOp(db.Model):
     # sentido pra CALL exercida (aí ele vendeu a ação pelo strike): dá pra calcular o
     # lucro da venda da ação (strike - preco_medio) além do prêmio da opção em si
     preco_medio = db.Column(db.Float, default=0)
+    # custo de corretagem cobrado no exercício — valor TOTAL já calculado pela corretora
+    # (varia por operação, cada corretora tem sua própria tabela; o usuário digita o
+    # valor final, não dá pra recalcular aqui)
+    custo_exercicio = db.Column(db.Float, default=0)
     obs = db.Column(db.Text, default="")
     ordem = db.Column(db.Integer, default=0)
 
@@ -885,7 +889,8 @@ def api_opcoes(cid):
         "data_abertura": o.data_abertura, "data_vencimento": o.data_vencimento,
         "strike": o.strike or 0, "quantidade": o.quantidade or 0, "premio": o.premio or 0,
         "status": o.status or "aberta", "data_fechamento": o.data_fechamento or "",
-        "custo_recompra": o.custo_recompra or 0, "preco_medio": o.preco_medio or 0, "obs": o.obs or "",
+        "custo_recompra": o.custo_recompra or 0, "preco_medio": o.preco_medio or 0,
+        "custo_exercicio": o.custo_exercicio or 0, "obs": o.obs or "",
     } for o in ops]
     return jsonify({
         "operacoes": out,
@@ -914,8 +919,8 @@ def api_opcoes_add(cid):
 
 OPCAO_FIELDS = {"ativo", "tipo", "data_abertura", "data_vencimento", "strike",
                 "quantidade", "premio", "status", "data_fechamento", "custo_recompra",
-                "preco_medio", "obs"}
-OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra", "preco_medio"}
+                "preco_medio", "custo_exercicio", "obs"}
+OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra", "preco_medio", "custo_exercicio"}
 
 
 @app.route("/api/opcoes/<int:oid>", methods=["PUT", "DELETE"])
@@ -970,6 +975,7 @@ def ensure_schema():
     add("rent_ativo", "inicio_ano", "inicio_ano INTEGER")
     add("rent_ativo", "inicio_mes", "inicio_mes INTEGER")
     add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
+    add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
     if insp.has_table("rent_ativo"):
         cols = [c["name"] for c in insp.get_columns("rent_ativo")]
         if "classe" in cols and "is_caixa" in cols:

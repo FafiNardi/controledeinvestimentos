@@ -173,9 +173,10 @@
           <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
           <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>Status</th><th>Custo recompra unit.</th>
           <th title="Só pra Call exercida: o preço médio que você já tinha nessa ação antes de ser exercido">Preço médio (ação)</th>
+          <th title="Valor TOTAL cobrado pela corretora nessa operação de exercício (varia por operação, digite o que veio na nota)">Custo corretagem</th>
           <th>Resultado (opção)</th>
           <th title="Só pra Call exercida com preço médio preenchido: (strike − preço médio) × quantidade">Lucro venda ação</th>
-          <th title="Lucro da venda da ação + prêmio da opção">Lucro total</th>
+          <th title="Lucro da venda da ação + prêmio da opção − custo de corretagem">Lucro total</th>
           <th>Retorno anualiz.</th><th>Obs.</th><th></th>
         </tr></thead>
         <tbody id="tbodyHist"></tbody>
@@ -282,7 +283,7 @@ function lucroVendaAcao(o){
 function lucroTotalOperacao(o){
   const lv = lucroVendaAcao(o);
   if(lv==null) return null;
-  return lv + premioTotal(o);
+  return lv + premioTotal(o) - (o.custo_exercicio||0);
 }
 function retornoPct(o){ // sobre o capital de referência (strike x quantidade)
   const base = (o.strike||0) * (o.quantidade||0);
@@ -493,7 +494,7 @@ function renderTabela(){
   const ops = opsFiltradas().slice().sort((a,b)=>(b.data_abertura||'').localeCompare(a.data_abertura||''));
   const tb = document.getElementById('tbodyHist');
   if(!ops.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="17">Nenhuma operação encontrada.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="18">Nenhuma operação encontrada.</td></tr>`;
     return;
   }
   tb.innerHTML = ops.map(o=>{
@@ -518,6 +519,7 @@ function renderTabela(){
       <td><span class="badge ${o.status}">${rotuloStatus(o.status)}</span></td>
       <td>${inputMoeda(o.id,'custo_recompra',o.custo_recompra,dis, o.status!=='recomprada')}</td>
       <td>${inputMoeda(o.id,'preco_medio',o.preco_medio,dis, !relevantePM)}</td>
+      <td>${inputMoeda(o.id,'custo_exercicio',o.custo_exercicio,dis, o.status!=='exercida')}</td>
       <td class="${res>=0?'pos':(res<0?'neg':'')}">${res==null?'—':BRL(res)}</td>
       <td class="${lucroVenda>=0?'pos':(lucroVenda<0?'neg':'')}">${lucroVenda==null?'—':BRL(lucroVenda)}</td>
       <td class="${lucroTotal>=0?'pos':(lucroTotal<0?'neg':'')}">${lucroTotal==null?'—':BRL(lucroTotal)}</td>
@@ -562,7 +564,7 @@ async function novaOperacao(){
   if(d.ok){ await load(); const linha=document.querySelector(`tr[data-id="${d.id}"] input`); if(linha) linha.focus(); }
 }
 
-const CAMPOS_MOEDA = ['strike','premio','custo_recompra','preco_medio'];
+const CAMPOS_MOEDA = ['strike','premio','custo_recompra','preco_medio','custo_exercicio'];
 async function editarCampo(id, campo, valor){
   const valorNum = CAMPOS_MOEDA.includes(campo) ? parseMoeda(valor)
                   : campo==='quantidade' ? parseFloat(valor||0) : valor;
@@ -586,14 +588,19 @@ async function abrirEncerrar(id){
   const mapa = {'1':'po','2':'exercida','3':'recomprada'};
   const status = mapa[resp.trim()];
   if(!status){ alert('Opção inválida.'); return; }
-  let custo = 0;
+  let custo = 0, corretagem = 0;
   if(status==='recomprada'){
     const c = prompt('Quanto você pagou pra recomprar (fechar), por opção?', '0');
     if(c===null) return;
     custo = parseMoeda(c);
   }
+  if(status==='exercida'){
+    const c = prompt('Quanto a corretora cobrou de corretagem nesse exercício? (valor total da nota, não por opção — deixe 0 se não teve ou se preferir lançar depois)', '0');
+    if(c===null) return;
+    corretagem = parseMoeda(c);
+  }
   await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({status, custo_recompra:custo, data_fechamento:o.data_vencimento})});
+    body: JSON.stringify({status, custo_recompra:custo, custo_exercicio:corretagem, data_fechamento:o.data_vencimento})});
   await load();
 }
 

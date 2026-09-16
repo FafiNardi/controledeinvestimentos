@@ -125,7 +125,9 @@
     </select>
   </label>
   <span id="filtroInfo" class="muted"></span>
-  <button class="ghost" onclick="limparOrdem()" style="margin-left:auto">↕ Limpar ordenação</button>
+  <button class="ghost" id="btnCopiarRent" onclick="copiarDaRentabilidade()" style="margin-left:auto"
+    title="Traz pra cá os ativos já cadastrados na Rentabilidade dessa carteira">📈→⚖️ Copiar da Rentabilidade</button>
+  <button class="ghost" onclick="limparOrdem()">↕ Limpar ordenação</button>
 </div>
 
 <div class="wrap">
@@ -264,6 +266,7 @@ async function load(){
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
      `<span class="ro-badge">👁 Somente leitura · de ${STATE.carteira.dono}</span>`;
   document.getElementById('addfoot').style.display = EDIT ? '' : 'none';
+  document.getElementById('btnCopiarRent').style.display = EDIT ? '' : 'none';
   document.getElementById('btnDelCart').style.display = EDIT ? '' : 'none';
   document.getElementById('btnRenomear').style.display = EDIT ? '' : 'none';
   renderTudo();
@@ -473,6 +476,33 @@ async function deletarCarteira(){
   const r = await fetch('/api/carteira/'+CID, {method:'DELETE'});
   if(r.ok){ CID = null; carregarCarteiras(); }
   else { alert('Erro ao excluir carteira.'); }
+}
+// Copia pro Rebalanceamento os ativos já cadastrados na Rentabilidade dessa mesma carteira —
+// evita ter que digitar um por um de novo; entram com classe copiada e % ideal em 0, pra você só
+// preencher o percentual de cada um. Sempre como "manual" (sem buscar cotação sozinho), porque
+// muitos nomes da Rentabilidade não são tickers de verdade (ex.: "Fundo DI", "IPCA + 2030") — se
+// algum for um ticker de bolsa de verdade, dá pra tirar o "manual" depois e usar "Atualizar cotações".
+async function copiarDaRentabilidade(){
+  if(!CID || !EDIT) return;
+  const r = await fetch('/api/carteira/'+CID+'/rent');
+  if(!r.ok){ alert('Não consegui ler os ativos da Rentabilidade dessa carteira.'); return; }
+  const rent = await r.json();
+  const ativosRent = rent.ativos || [];
+  if(!ativosRent.length){ alert('Essa carteira não tem nenhum ativo cadastrado na Rentabilidade ainda.'); return; }
+  const jaTem = new Set(STATE.assets.map(a=>a.ticker.toUpperCase()));
+  const faltando = ativosRent.filter(a => !jaTem.has(a.nome.trim().toUpperCase()));
+  if(!faltando.length){ alert('Todos os ativos da Rentabilidade já estão no Rebalanceamento.'); return; }
+  if(!confirm(`Copiar ${faltando.length} ativo(s) da Rentabilidade pro Rebalanceamento?\n\n`+
+    faltando.map(a=>`• ${a.nome}${a.classe?' ('+a.classe+')':''}`).join('\n')+
+    `\n\nEles entram com % ideal em 0 — você ajusta depois.`)) return;
+  const st = document.getElementById('status'); st.textContent = 'copiando ativos...';
+  for(const a of faltando){
+    await fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker: a.nome.trim(), classe: a.classe||'', manual:1})});
+  }
+  st.textContent = '';
+  await load();
+  alert(`${faltando.length} ativo(s) copiado(s). Agora é só ajustar o % ideal de cada um.`);
 }
 async function refresh(){
   if(!CID) return;

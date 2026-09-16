@@ -12,24 +12,19 @@
     --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
     --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
     --green:#34d399; --red:#f87171; --amber:#f5b754; --purple:#a78bfa;
+    --page-a:var(--amber); --page-b:var(--purple); --tab-txt-on:#241705;
   }
   html[data-theme="light"]{
     --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
     --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
     --green:#16a34a; --red:#dc2626; --amber:#b45309; --purple:#7c3aed;
+    --tab-txt-on:#fff;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
        background:var(--bg);color:var(--txt);font-size:13.5px}
   .num,.stat .v,td,td input,td select{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
        font-variant-numeric:tabular-nums}
-  header{padding:12px 24px;display:flex;align-items:center;gap:14px;flex-wrap:nowrap;overflow-x:auto;
-         border-bottom:1px solid var(--line);background:var(--panel)}
-  header > *{flex-shrink:0}
-  h1{font-size:15px;margin:0;color:var(--txt);font-weight:800;letter-spacing:-.01em;
-     display:flex;align-items:center;gap:8px}
-  h1 .mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,var(--amber),var(--purple));
-           display:inline-block}
   select,input,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
              border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
   button{background:var(--blue);color:#fff;border:0;border-radius:7px;
@@ -38,14 +33,42 @@
   button:disabled{opacity:.5;cursor:default}
   button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
   button.mini{padding:4px 8px;font-size:11.5px;border-radius:6px}
-  .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
-            border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
-  .nav-btn.on{background:var(--txt);color:var(--bg);border-color:var(--txt)}
-  .nav-btn:hover{filter:brightness(1.1)}
-  .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
-  .userbox a{color:var(--accent);text-decoration:none}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
+
+  /* ---- Cabeçalho em duas camadas: barra principal (marca fixa + navegação entre as
+     3 páginas + tema/usuário) sempre com o mesmo conteúdo enxuto, então nunca estoura;
+     barra de contexto abaixo, com fundo levemente diferente, pro que muda de página
+     pra página (carteira, filtros, ações). Sem overflow-x — quando o espaço aperta,
+     as duas linhas quebram de forma previsível em vez de empurrar botão pra fora da tela. */
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select{max-width:240px}
   .wrap{padding:0 24px 40px}
   .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap;align-items:stretch}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
@@ -99,18 +122,23 @@
 </style>
 </head>
 <body>
-<header>
-  <h1><span class="mark"></span>Opções</h1>
-  <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
-    <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
-  </label>
-  <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
-  <button class="nav-btn" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
-  <button class="nav-btn on">🎯 Opções</button>
-  <span id="roBadge"></span>
-  <div class="userbox">
-    <button class="ghost" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
-    👤 {{ usuario }} · <a href="/logout">sair</a>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Opções</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link on">🎯 Opções</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+    <span id="roBadge"></span>
   </div>
 </header>
 

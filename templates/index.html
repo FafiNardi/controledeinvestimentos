@@ -5,52 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Carteira • Rebalanceamento Dinâmico</title>
 <script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   :root{
-    --bg:#0f1419; --panel:#1a2230; --panel2:#212c3d; --line:#2c3a4f;
-    --txt:#e6edf3; --muted:#8a9bb0; --accent:#2dd4bf; --blue:#3b82f6;
-    --green:#22c55e; --red:#ef4444; --amber:#f59e0b;
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754;
+    --page-a:var(--blue); --page-b:var(--accent); --tab-txt-on:#04141c;
   }
   html[data-theme="light"]{
-    --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f5; --line:#d7dee6;
-    --txt:#1a2230; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#2563eb;
-    --green:#16a34a; --red:#dc2626; --amber:#d97706;
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309;
+    --tab-txt-on:#fff;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
-       background:var(--bg);color:var(--txt);font-size:13px}
-  header{padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-         border-bottom:1px solid var(--line);background:var(--panel)}
-  h1{font-size:18px;margin:0;color:var(--accent);font-weight:700}
-  .cfg{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;align-items:center}
-  .cfg label{display:flex;flex-direction:column;font-size:11px;color:var(--muted);gap:3px}
-  .cfg input,.selcart{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-             border-radius:6px;padding:6px 8px;font-size:13px}
-  .cfg input{width:150px}
-  .selcart{padding:7px 10px;font-size:13px;max-width:280px}
-  button{background:var(--blue);color:#fff;border:0;border-radius:6px;
-         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .stat .v,td,td input{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  .selcart{padding:7px 10px;font-size:13px;max-width:260px}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
   button:hover{filter:brightness(1.1)}
-  button.ghost{background:var(--panel2);border:1px solid var(--line)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
   button:disabled{opacity:.45;cursor:not-allowed}
-  .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
-            border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
-  .nav-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
-  .nav-btn:hover{filter:brightness(1.1)}
-  .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
-  .userbox a{color:var(--accent);text-decoration:none}
   .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
             border-radius:20px;font-size:11px;font-weight:700}
-  .stats{display:flex;gap:14px;padding:12px 24px;flex-wrap:wrap}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-        padding:10px 16px;min-width:150px}
-  .stat .k{font-size:11px;color:var(--muted)}
-  .stat .v{font-size:18px;font-weight:700;margin-top:2px}
-  .toolbar{display:flex;align-items:center;gap:14px;padding:6px 24px 12px}
+
+  /* ---- Cabeçalho em duas camadas: barra principal (marca fixa + navegação entre as
+     3 páginas + tema/usuário) sempre com o mesmo conteúdo enxuto, então nunca estoura;
+     barra de contexto abaixo, com fundo levemente diferente, pro que muda de página
+     pra página (carteira, moeda, cotações). Sem overflow-x — quando o espaço aperta, as
+     duas linhas quebram de forma previsível em vez de empurrar botão pra fora da tela. */
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select,.ctx-label input{font-size:13px}
+  .ctx-divider{width:1px;align-self:stretch;background:var(--line);margin:0 2px;flex-shrink:0}
+
+  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+        padding:10px 14px;min-width:150px;flex:1}
+  .stat .k{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:19px;font-weight:700;margin-top:5px}
+  .toolbar{display:flex;align-items:center;gap:14px;padding:6px 24px 16px;flex-wrap:wrap}
   .toolbar label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
-  .toolbar select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-                  border-radius:6px;padding:6px 8px;font-size:13px}
-  .wrap{padding:0 16px 60px}
+  .wrap{padding:0 24px 60px}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:600;
@@ -84,36 +111,40 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>📊 Rebalanceamento</h1>
-  <label class="userbox" style="flex-direction:row">Carteira:
-    <select id="selCarteira" class="selcart" onchange="trocarCarteira()"></select>
-  </label>
-  <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
-  <button class="nav-btn" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
-  <button class="nav-btn" onclick="location.href='/rentabilidade?aba=proventos'">💰 Proventos por classe</button>
-  <button class="nav-btn on" onclick="location.href='/'">📊 Rebalanceamento</button>
-  <button class="nav-btn" onclick="location.href='/opcoes'">🎯 Opções</button>
-  <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
-  <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
-  <span id="roBadge"></span>
-  <div class="cfg">
-    <label>Moeda
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Rebalanceamento</div>
+    <nav class="tabs-nav">
+      <button class="tab-link on">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="{{ url_for('logout') }}">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" class="selcart" onchange="trocarCarteira()"></select>
+    </label>
+    <button class="ghost" id="btnRenomear" onclick="renomearCarteira()" title="Renomear carteira">✎</button>
+    <span id="roBadge"></span>
+    <div class="ctx-divider"></div>
+    <label class="ctx-label">Moeda
       <select id="selMoeda" onchange="saveMoeda()">
         <option value="BRL">R$ Real</option>
         <option value="USD">US$ Dólar</option>
       </select>
     </label>
-    <label>Carteira Ideal
+    <label class="ctx-label">Carteira ideal
       <input id="carteiraIdeal" type="text" onchange="saveConfig()"
-             onfocus="this.select()" placeholder="R$ 0.00">
+             onfocus="this.select()" placeholder="R$ 0.00" style="width:130px">
     </label>
-    <button onclick="refresh()" id="btnRefresh">⟳ Atualizar cotações</button>
-    <span id="status"></span>
-    <div class="userbox">
-      <button class="ghost" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
-      👤 {{ usuario }} · <a href="{{ url_for('logout') }}">sair</a>
-    </div>
+    <button class="ghost" onclick="refresh()" id="btnRefresh">⟳ Atualizar cotações</button>
+    <span id="status" class="muted"></span>
+    <div class="topbar-spacer"></div>
+    <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
+    <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   </div>
 </header>
 

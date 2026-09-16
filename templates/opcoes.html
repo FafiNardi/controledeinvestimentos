@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Opções • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --purple:#a78bfa;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --purple:#7c3aed;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .num,.stat .v,td,td input,td select{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  header{padding:12px 24px;display:flex;align-items:center;gap:14px;flex-wrap:nowrap;overflow-x:auto;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header > *{flex-shrink:0}
+  h1{font-size:15px;margin:0;color:var(--txt);font-weight:800;letter-spacing:-.01em;
+     display:flex;align-items:center;gap:8px}
+  h1 .mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,var(--amber),var(--purple));
+           display:inline-block}
+  select,input,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.mini{padding:4px 8px;font-size:11.5px;border-radius:6px}
+  .nav-btn{background:var(--panel2);color:var(--muted);border:1px solid var(--line);
+            border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  .nav-btn.on{background:var(--txt);color:var(--bg);border-color:var(--txt)}
+  .nav-btn:hover{filter:brightness(1.1)}
+  .userbox{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-left:auto}
+  .userbox a{color:var(--accent);text-decoration:none}
+  .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
+            border-radius:20px;font-size:11px;font-weight:700}
+  .wrap{padding:0 24px 40px}
+  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap;align-items:stretch}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+        padding:10px 14px;min-width:150px;flex:1}
+  .stat .k{font-size:10.5px;color:var(--muted);white-space:nowrap;font-weight:700;
+           text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:19px;font-weight:700;margin-top:5px;white-space:nowrap}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .muted{color:var(--muted)}
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;
+         white-space:nowrap}
+  .badge.put{background:rgba(91,141,239,.16);color:var(--blue)}
+  .badge.call{background:rgba(167,139,250,.16);color:var(--purple)}
+  .badge.aberta{background:rgba(245,183,84,.16);color:var(--amber)}
+  .badge.po{background:rgba(52,211,153,.16);color:var(--green)}
+  .badge.exercida{background:rgba(91,141,239,.16);color:var(--blue)}
+  .badge.recomprada{background:rgba(148,163,184,.16);color:var(--muted)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .charts{display:grid;grid-template-columns:1.3fr 1fr;gap:14px}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
+            box-shadow:0 1px 2px rgba(0,0,0,.1)}
+  .chartbox h3{margin:0 0 10px;font-size:12.5px;color:var(--txt);font-weight:700}
+  .chart-wrap{height:230px}
+  @media(max-width:900px){.charts{grid-template-columns:1fr}}
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
+     text-transform:uppercase;letter-spacing:.04em}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td input,td select{width:100%;min-width:78px;text-align:center;padding:5px;border-radius:6px;
+    font-size:12px;border:1px solid transparent;background:transparent;color:var(--txt)}
+  td input:hover,td select:hover{border-color:var(--line)}
+  td input:focus,td select:focus{border-color:var(--accent);background:var(--panel2);outline:0}
+  td.ativo-cell input{text-align:left;font-family:inherit;font-weight:700;min-width:90px}
+  .addbar{display:flex;justify-content:flex-end;padding:12px 0 4px}
+  .empty-row td{text-align:center;color:var(--muted);padding:20px}
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 0 4px}
+  .filtros label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+  .acoes-cell{display:flex;gap:4px;justify-content:flex-end}
+  .rank-bar-wrap{background:var(--panel2);border-radius:5px;height:6px;overflow:hidden;margin-top:4px}
+  .rank-bar{height:100%;background:var(--accent);border-radius:5px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="mark"></span>Opções</h1>
+  <label class="userbox" style="margin-left:0;flex-direction:row">Carteira:
+    <select id="selCarteira" onchange="trocarCarteira()" style="max-width:260px"></select>
+  </label>
+  <button class="nav-btn" onclick="location.href='/'">📊 Rebalanceamento</button>
+  <button class="nav-btn" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+  <button class="nav-btn on">🎯 Opções</button>
+  <span id="roBadge"></span>
+  <div class="userbox">
+    <button class="ghost" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    👤 {{ usuario }} · <a href="/logout">sair</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stats" id="stats"></div>
+
+  <div class="group-label">Prêmio recebido por mês</div>
+  <div class="charts">
+    <div class="chartbox"><h3>Put vs. Call, por mês de abertura</h3>
+      <div class="chart-wrap"><canvas id="chMes"></canvas></div>
+    </div>
+    <div class="chartbox"><h3>Ranking por ativo (prêmio total)</h3>
+      <div id="ranking" style="max-height:230px;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <div class="group-label">Operações em aberto</div>
+  <div id="abertasVazio" class="muted" style="padding:10px 0">Nenhuma operação em aberto no momento.</div>
+  <div class="ledger" id="abertasBox" style="display:none">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th><th>Tipo</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
+          <th>Qtde</th><th>Prêmio</th><th>% s/ strike</th><th></th>
+        </tr></thead>
+        <tbody id="tbodyAbertas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label">Histórico completo</div>
+  <div class="filtros">
+    <label>Ano:
+      <select id="filtroAno" onchange="renderTabela()"><option value="">Todos</option></select>
+    </label>
+    <label>Ativo:
+      <select id="filtroAtivo" onchange="renderTabela()"><option value="">Todos</option></select>
+    </label>
+    <label>Tipo:
+      <select id="filtroTipo" onchange="renderTabela()">
+        <option value="">Todos</option><option value="PUT">Put</option><option value="CALL">Call</option>
+      </select>
+    </label>
+    <label>Status:
+      <select id="filtroStatus" onchange="renderTabela()">
+        <option value="">Todos</option><option value="aberta">Aberta</option>
+        <option value="po">Expirou (pó)</option><option value="exercida">Exercida</option>
+        <option value="recomprada">Recomprada</option>
+      </select>
+    </label>
+    <div class="addbar" style="flex:1;margin:0" id="addbar">
+      <button onclick="novaOperacao()">+ Nova operação</button>
+    </div>
+  </div>
+
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
+          <th>Qtde</th><th>Prêmio</th><th>Status</th><th>Fechamento</th><th>Custo recompra</th>
+          <th>Resultado</th><th>Retorno anualiz.</th><th>Obs.</th><th></th>
+        </tr></thead>
+        <tbody id="tbodyHist"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let CID = null, DATA = { operacoes: [], carteira: null }, EDIT = false, MOEDA = 'BRL';
+const charts = {};
+
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const PCT = v => v==null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+
+async function load(){
+  const r = await fetch('/api/carteira/'+CID+'/opcoes');
+  DATA = await r.json();
+  EDIT = DATA.editavel;
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  document.getElementById('roBadge').innerHTML = EDIT ? '' :
+    `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
+  document.getElementById('addbar').style.display = EDIT ? '' : 'none';
+  popularFiltros();
+  renderTudo();
+}
+
+// ---------------------------------------------------------------- cálculos
+
+function hojeStr(){ return new Date().toISOString().slice(0,10); }
+function diasEntre(a, b){
+  if(!a || !b) return null;
+  const d1 = new Date(a+'T00:00:00'), d2 = new Date(b+'T00:00:00');
+  return Math.round((d2-d1)/86400000);
+}
+// resultado líquido só existe pra operação encerrada: prêmio inteiro, menos o custo de
+// recompra se ela foi fechada antes do vencimento pagando pra sair
+function resultadoOp(o){
+  if(o.status==='aberta') return null;
+  return (o.premio||0) - (o.status==='recomprada' ? (o.custo_recompra||0) : 0);
+}
+function retornoPct(o){ // sobre o capital de referência (strike x quantidade)
+  const base = (o.strike||0) * (o.quantidade||0);
+  if(!base) return null;
+  const res = resultadoOp(o);
+  if(res==null) return null;
+  return res/base*100;
+}
+function retornoAnualizado(o){
+  const pct = retornoPct(o);
+  if(pct==null) return null;
+  const fech = o.data_fechamento || o.data_vencimento;
+  const dias = diasEntre(o.data_abertura, fech);
+  if(!dias || dias<=0) return null;
+  return pct * (365/dias);
+}
+
+// ---------------------------------------------------------------- filtros/render
+
+function opsFiltradas(){
+  const ano = document.getElementById('filtroAno').value;
+  const ativo = document.getElementById('filtroAtivo').value;
+  const tipo = document.getElementById('filtroTipo').value;
+  const status = document.getElementById('filtroStatus').value;
+  return (DATA.operacoes||[]).filter(o=>{
+    if(ano && !(o.data_abertura||'').startsWith(ano)) return false;
+    if(ativo && o.ativo!==ativo) return false;
+    if(tipo && o.tipo!==tipo) return false;
+    if(status && o.status!==status) return false;
+    return true;
+  });
+}
+
+function popularFiltros(){
+  const anos = [...new Set((DATA.operacoes||[]).map(o=>(o.data_abertura||'').slice(0,4)).filter(Boolean))].sort().reverse();
+  const ativos = [...new Set((DATA.operacoes||[]).map(o=>o.ativo).filter(Boolean))].sort();
+  const selAno = document.getElementById('filtroAno'), selAtivo = document.getElementById('filtroAtivo');
+  const anoAtual = selAno.value, ativoAtual = selAtivo.value;
+  selAno.innerHTML = '<option value="">Todos</option>' + anos.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selAtivo.innerHTML = '<option value="">Todos</option>' + ativos.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selAno.value = anos.includes(anoAtual) ? anoAtual : '';
+  selAtivo.value = ativos.includes(ativoAtual) ? ativoAtual : '';
+}
+
+function renderTudo(){
+  renderStats();
+  renderGraficoMes();
+  renderRanking();
+  renderAbertas();
+  renderTabela();
+}
+
+function renderStats(){
+  const ops = DATA.operacoes||[];
+  const fechadas = ops.filter(o=>o.status!=='aberta');
+  const abertas = ops.filter(o=>o.status==='aberta');
+  const totalPremio = ops.reduce((s,o)=>s+(o.premio||0),0);
+  const totalRealizado = fechadas.reduce((s,o)=>s+(resultadoOp(o)||0),0);
+  const premioEmAberto = abertas.reduce((s,o)=>s+(o.premio||0),0);
+  const foramExercidas = fechadas.filter(o=>o.status==='exercida').length;
+  const taxaSucesso = fechadas.length ? (1 - foramExercidas/fechadas.length)*100 : null;
+  const anualizados = fechadas.map(retornoAnualizado).filter(v=>v!=null);
+  const mediaAnualizada = anualizados.length ? anualizados.reduce((a,b)=>a+b,0)/anualizados.length : null;
+  const porTipo = t => ops.filter(o=>o.tipo===t).reduce((s,o)=>s+(o.premio||0),0);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="k">Prêmio recebido (total)</div><div class="v">${BRL(totalPremio)}</div>
+      <div class="sub">Put ${BRL(porTipo('PUT'))} · Call ${BRL(porTipo('CALL'))}</div></div>
+    <div class="stat"><div class="k">Resultado líquido realizado</div>
+      <div class="v ${totalRealizado>=0?'pos':'neg'}">${BRL(totalRealizado)}</div>
+      <div class="sub">${fechadas.length} operaç${fechadas.length===1?'ão encerrada':'ões encerradas'}</div></div>
+    <div class="stat"><div class="k">Em aberto</div><div class="v">${BRL(premioEmAberto)}</div>
+      <div class="sub">${abertas.length} operaç${abertas.length===1?'ão':'ões'} · prêmio já recebido, ainda exposta</div></div>
+    <div class="stat"><div class="k">Taxa de "ficou com o prêmio"</div>
+      <div class="v">${taxaSucesso==null?'—':PCT(taxaSucesso)}</div>
+      <div class="sub">não foi exercida (pó ou recompra)</div></div>
+    <div class="stat"><div class="k">Retorno médio anualizado</div>
+      <div class="v ${mediaAnualizada>=0?'pos':'neg'}">${mediaAnualizada==null?'—':PCT(mediaAnualizada)}</div>
+      <div class="sub">sobre o capital de referência (strike × qtde)</div></div>
+  `;
+}
+
+function mesKey(d){ return (d||'').slice(0,7); } // YYYY-MM
+function renderGraficoMes(){
+  const ops = DATA.operacoes||[];
+  const meses = [...new Set(ops.map(o=>mesKey(o.data_abertura)).filter(Boolean))].sort();
+  const put = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='PUT').reduce((s,o)=>s+(o.premio||0),0));
+  const call = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='CALL').reduce((s,o)=>s+(o.premio||0),0));
+  if(charts.mes) charts.mes.destroy();
+  charts.mes = new Chart(document.getElementById('chMes'), {
+    type:'bar',
+    data:{ labels: meses, datasets:[
+      {label:'Put', data:put, backgroundColor:'rgba(91,141,239,.75)', stack:'s'},
+      {label:'Call', data:call, backgroundColor:'rgba(167,139,250,.75)', stack:'s'},
+    ]},
+    options:{ maintainAspectRatio:false, responsive:true,
+      scales:{ x:{stacked:true, grid:{display:false}, ticks:{color:'#8a9bb0'}},
+               y:{stacked:true, grid:{color:'rgba(255,255,255,.06)'}, ticks:{color:'#8a9bb0', callback:v=>BRL(v)}} },
+      plugins:{ legend:{labels:{color:'#c9d4e0'}},
+        tooltip:{ callbacks:{ label: c => c.dataset.label+': '+BRL(c.parsed.y) } } }
+    }
+  });
+}
+
+function renderRanking(){
+  const ops = DATA.operacoes||[];
+  const porAtivo = {};
+  ops.forEach(o=>{
+    if(!o.ativo) return;
+    porAtivo[o.ativo] = porAtivo[o.ativo] || {premio:0, n:0};
+    porAtivo[o.ativo].premio += o.premio||0;
+    porAtivo[o.ativo].n += 1;
+  });
+  const lista = Object.entries(porAtivo).sort((a,b)=>b[1].premio-a[1].premio);
+  const max = lista.length ? lista[0][1].premio : 0;
+  document.getElementById('ranking').innerHTML = lista.length ? lista.map(([ativo,v])=>`
+    <div style="padding:7px 0">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px">
+        <b>${ativo}</b><span>${BRL(v.premio)} <span class="muted">· ${v.n}x</span></span>
+      </div>
+      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${max?v.premio/max*100:0}%"></div></div>
+    </div>`).join('') : '<div class="muted" style="padding:10px 0">Nenhuma operação lançada ainda.</div>';
+}
+
+function renderAbertas(){
+  const abertas = (DATA.operacoes||[]).filter(o=>o.status==='aberta')
+    .sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||''));
+  document.getElementById('abertasVazio').style.display = abertas.length ? 'none' : '';
+  document.getElementById('abertasBox').style.display = abertas.length ? '' : 'none';
+  const hoje = hojeStr();
+  document.getElementById('tbodyAbertas').innerHTML = abertas.map(o=>{
+    const dias = diasEntre(hoje, o.data_vencimento);
+    const pctStrike = (o.strike && o.quantidade) ? (o.premio/(o.strike*o.quantidade)*100) : null;
+    return `<tr>
+      <td><b>${o.ativo}</b></td>
+      <td><span class="badge ${o.tipo.toLowerCase()}">${o.tipo==='PUT'?'Put':'Call'}</span></td>
+      <td>${fmtData(o.data_vencimento)}</td>
+      <td class="${dias!=null && dias<=7 ? 'neg':''}">${dias==null?'—':dias+'d'}</td>
+      <td>${BRL(o.strike)}</td>
+      <td>${o.quantidade}</td>
+      <td>${BRL(o.premio)}</td>
+      <td>${pctStrike==null?'—':PCT(pctStrike)}</td>
+      <td class="acoes-cell">
+        ${EDIT ? `<button class="mini ghost" onclick="abrirEncerrar(${o.id})">Encerrar</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function fmtData(d){
+  if(!d) return '—';
+  const [a,m,dd] = d.split('-');
+  return dd+'/'+m+'/'+a;
+}
+
+function renderTabela(){
+  const ops = opsFiltradas().slice().sort((a,b)=>(b.data_abertura||'').localeCompare(a.data_abertura||''));
+  const tb = document.getElementById('tbodyHist');
+  if(!ops.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="14">Nenhuma operação encontrada.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = ops.map(o=>{
+    const res = resultadoOp(o);
+    const anual = retornoAnualizado(o);
+    const dis = EDIT ? '' : 'disabled';
+    return `<tr data-id="${o.id}">
+      <td class="ativo-cell"><input value="${o.ativo}" ${dis} onchange="editarCampo(${o.id},'ativo',this.value)"></td>
+      <td><select ${dis} onchange="editarCampo(${o.id},'tipo',this.value)">
+            <option value="PUT" ${o.tipo==='PUT'?'selected':''}>Put</option>
+            <option value="CALL" ${o.tipo==='CALL'?'selected':''}>Call</option>
+          </select></td>
+      <td><input type="date" value="${o.data_abertura||''}" ${dis} onchange="editarCampo(${o.id},'data_abertura',this.value)"></td>
+      <td><input type="date" value="${o.data_vencimento||''}" ${dis} onchange="editarCampo(${o.id},'data_vencimento',this.value)"></td>
+      <td><input type="number" step="0.01" value="${o.strike}" ${dis} onchange="editarCampo(${o.id},'strike',this.value)"></td>
+      <td><input type="number" step="1" value="${o.quantidade}" ${dis} onchange="editarCampo(${o.id},'quantidade',this.value)"></td>
+      <td><input type="number" step="0.01" value="${o.premio}" ${dis} onchange="editarCampo(${o.id},'premio',this.value)"></td>
+      <td><span class="badge ${o.status}">${rotuloStatus(o.status)}</span></td>
+      <td><input type="date" value="${o.data_fechamento||''}" ${dis} onchange="editarCampo(${o.id},'data_fechamento',this.value)"></td>
+      <td><input type="number" step="0.01" value="${o.custo_recompra}" ${dis} onchange="editarCampo(${o.id},'custo_recompra',this.value)" ${o.status!=='recomprada'?'style="opacity:.4"':''}></td>
+      <td class="${res>=0?'pos':(res<0?'neg':'')}">${res==null?'—':BRL(res)}</td>
+      <td class="${anual>=0?'pos':(anual<0?'neg':'')}">${anual==null?'—':PCT(anual)}</td>
+      <td class="ativo-cell"><input value="${(o.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampo(${o.id},'obs',this.value)"></td>
+      <td class="acoes-cell">
+        ${EDIT ? `<button class="mini ghost" title="Excluir" onclick="excluirOp(${o.id})">🗑</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function rotuloStatus(s){
+  return {aberta:'Aberta', po:'Expirou (pó)', exercida:'Exercida', recomprada:'Recomprada'}[s] || s;
+}
+
+// ---------------------------------------------------------------- ações
+
+async function novaOperacao(){
+  const hoje = hojeStr();
+  const venc = new Date(); venc.setDate(venc.getDate()+30);
+  const r = await fetch('/api/carteira/'+CID+'/opcoes',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ativo:'', tipo:'PUT', data_abertura:hoje, data_vencimento:venc.toISOString().slice(0,10),
+      strike:0, quantidade:100, premio:0})});
+  const d = await r.json();
+  if(d.ok){ await load(); const linha=document.querySelector(`tr[data-id="${d.id}"] input`); if(linha) linha.focus(); }
+}
+
+async function editarCampo(id, campo, valor){
+  await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({[campo]:valor})});
+  const o = (DATA.operacoes||[]).find(x=>x.id===id);
+  if(o){
+    o[campo] = ['strike','quantidade','premio','custo_recompra'].includes(campo) ? parseFloat(valor||0) : valor;
+    popularFiltros();
+    renderStats(); renderGraficoMes(); renderRanking(); renderAbertas(); renderTabela();
+  }
+}
+
+async function abrirEncerrar(id){
+  const o = (DATA.operacoes||[]).find(x=>x.id===id);
+  if(!o) return;
+  const resp = prompt('Como essa operação terminou?\n1 = Expirou sem exercício (ficou com o prêmio)\n2 = Foi exercida\n3 = Recomprada antes do vencimento (paguei pra fechar)', '1');
+  if(resp===null) return;
+  const mapa = {'1':'po','2':'exercida','3':'recomprada'};
+  const status = mapa[resp.trim()];
+  if(!status){ alert('Opção inválida.'); return; }
+  let custo = 0;
+  if(status==='recomprada'){
+    const c = prompt('Quanto você pagou pra recomprar (fechar) a operação?', '0');
+    if(c===null) return;
+    custo = parseFloat(c.replace(',','.'))||0;
+  }
+  const fech = prompt('Data de encerramento (AAAA-MM-DD):', o.data_vencimento || hojeStr());
+  if(fech===null) return;
+  await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status, custo_recompra:custo, data_fechamento:fech})});
+  await load();
+}
+
+async function excluirOp(id){
+  if(!confirm('Excluir esta operação? Não pode ser desfeito.')) return;
+  await fetch('/api/opcoes/'+id,{method:'DELETE'});
+  await load();
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

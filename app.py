@@ -81,6 +81,7 @@ class Carteira(db.Model):
     # por violar a chave estrangeira. Só não tinha aparecido antes porque nenhuma carteira
     # com dado de Rentabilidade tinha sido excluída ainda.
     rentativos = db.relationship("RentAtivo", cascade="all, delete-orphan")
+    opcoes = db.relationship("OpcaoOp", cascade="all, delete-orphan")
 
 
 class Asset(db.Model):
@@ -134,6 +135,27 @@ class RentMov(db.Model):
     # como estimativa enquanto o mês não fecha (ver `if final is None` abaixo).
     valor_final = db.Column(db.Float)
     __table_args__ = (db.UniqueConstraint("ativo_id", "ano", "mes"),)
+
+
+class OpcaoOp(db.Model):
+    """Venda coberta de put/call (geração de renda com opções). O prêmio é sempre
+    recebido inteiro na abertura; o campo `status` só registra o que aconteceu no
+    fim: virou pó (expirou sem exercício), foi exercida, ou foi recomprada antes
+    do vencimento (aí sim há um custo pra fechar, que abate do prêmio)."""
+    id = db.Column(db.Integer, primary_key=True)
+    carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
+    ativo = db.Column(db.String(40), nullable=False, default="")
+    tipo = db.Column(db.String(4), nullable=False, default="PUT")   # PUT ou CALL
+    data_abertura = db.Column(db.String(10), default="")     # YYYY-MM-DD
+    data_vencimento = db.Column(db.String(10), default="")   # YYYY-MM-DD
+    strike = db.Column(db.Float, default=0)
+    quantidade = db.Column(db.Float, default=0)   # nº de ações cobertas (não "contratos")
+    premio = db.Column(db.Float, default=0)       # total recebido na abertura
+    status = db.Column(db.String(12), default="aberta")  # aberta, po, exercida, recomprada
+    data_fechamento = db.Column(db.String(10), default="")
+    custo_recompra = db.Column(db.Float, default=0)
+    obs = db.Column(db.Text, default="")
+    ordem = db.Column(db.Integer, default=0)
 
 
 @login_manager.user_loader
@@ -392,6 +414,7 @@ def api_delete_carteira(cid):
         RentMov.query.filter(RentMov.ativo_id.in_(ativo_ids)).delete(synchronize_session=False)
     RentAtivo.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     Asset.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
+    OpcaoOp.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     db.session.delete(c)
     db.session.commit()
     return jsonify({"ok": True})
@@ -832,6 +855,90 @@ def api_rent_mov():
             if k in RENT_FIELDS:
                 setattr(mv, k, float(v or 0))
         db.session.commit()
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- #
+# Opções (venda coberta de put/call)
+# --------------------------------------------------------------------------- #
+
+@app.route("/opcoes")
+@login_required
+def opcoes():
+    return render_template("opcoes.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/opcoes")
+@login_required
+def api_opcoes(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
+    out = [{
+        "id": o.id, "ativo": o.ativo, "tipo": o.tipo,
+        "data_abertura": o.data_abertura, "data_vencimento": o.data_vencimento,
+        "strike": o.strike or 0, "quantidade": o.quantidade or 0, "premio": o.premio or 0,
+        "status": o.status or "aberta", "data_fechamento": o.data_fechamento or "",
+        "custo_recompra": o.custo_recompra or 0, "obs": o.obs or "",
+    } for o in ops]
+    return jsonify({
+        "operacoes": out,
+        "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
+        "editavel": c.user_id == current_user.id,
+    })
+
+
+@app.route("/api/carteira/<int:cid>/opcoes", methods=["POST"])
+@login_required
+def api_opcoes_add(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True) or {}
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    o = OpcaoOp(carteira_id=cid, ativo=(d.get("ativo") or "").strip().upper(),
+                tipo=d.get("tipo") if d.get("tipo") in ("PUT", "CALL") else "PUT",
+                data_abertura=d.get("data_abertura") or hoje,
+                data_vencimento=d.get("data_vencimento") or hoje,
+                strike=float(d.get("strike") or 0), quantidade=float(d.get("quantidade") or 100),
+                premio=float(d.get("premio") or 0), status="aberta")
+    db.session.add(o)
+    db.session.commit()
+    return jsonify({"ok": True, "id": o.id})
+
+
+OPCAO_FIELDS = {"ativo", "tipo", "data_abertura", "data_vencimento", "strike",
+                "quantidade", "premio", "status", "data_fechamento", "custo_recompra", "obs"}
+OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra"}
+
+
+@app.route("/api/opcoes/<int:oid>", methods=["PUT", "DELETE"])
+@login_required
+def api_opcao_editar(oid):
+    o = db.session.get(OpcaoOp, oid)
+    if not o:
+        abort(404)
+    require_owner(db.session.get(Carteira, o.carteira_id))
+    if request.method == "DELETE":
+        db.session.delete(o)
+        db.session.commit()
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    for k, v in d.items():
+        if k not in OPCAO_FIELDS:
+            continue
+        if k in OPCAO_NUM_FIELDS:
+            setattr(o, k, float(v or 0))
+        elif k == "ativo":
+            o.ativo = (v or "").strip().upper()
+        elif k == "tipo":
+            if v in ("PUT", "CALL"):
+                o.tipo = v
+        elif k == "status":
+            if v in ("aberta", "po", "exercida", "recomprada"):
+                o.status = v
+        else:
+            setattr(o, k, v or "")
+    db.session.commit()
     return jsonify({"ok": True})
 
 

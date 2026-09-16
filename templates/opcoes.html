@@ -134,7 +134,7 @@
       <table>
         <thead><tr>
           <th>Ativo</th><th>Tipo</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
-          <th>Qtde</th><th>Prêmio</th><th>% s/ strike</th><th></th>
+          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th></th>
         </tr></thead>
         <tbody id="tbodyAbertas"></tbody>
       </table>
@@ -171,10 +171,32 @@
       <table>
         <thead><tr>
           <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
-          <th>Qtde</th><th>Prêmio</th><th>Status</th><th>Fechamento</th><th>Custo recompra</th>
+          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>Status</th><th>Custo recompra unit.</th>
           <th>Resultado</th><th>Retorno anualiz.</th><th>Obs.</th><th></th>
         </tr></thead>
         <tbody id="tbodyHist"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label">Imposto de Renda (estimativa)</div>
+  <p class="muted" style="font-size:12px;max-width:820px;margin:0 0 12px">
+    Opções <b>não</b> têm a isenção de R$ 20.000/mês que existe pra venda de ações comuns — o
+    imposto é sempre devido sobre o resultado líquido do mês (soma dos ganhos e perdas de todas
+    as operações de opções encerradas naquele mês), 15% em operações comuns ou 20% se abertura e
+    fechamento caírem no mesmo dia (day trade). Prejuízo de um mês abate o lucro dos meses
+    seguintes, dentro do mesmo regime. Pago via DARF (código 6015), até o último dia útil do mês
+    seguinte. Isto é uma estimativa pra te ajudar a acompanhar — confirme sempre no e-CAC ou com
+    seu contador antes de pagar.
+  </p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Mês</th><th>Regime</th><th>Resultado do mês</th><th>Prejuízo compensado</th>
+          <th>Base de cálculo</th><th>Alíquota</th><th>IR devido (DARF)</th><th>Saldo a compensar</th>
+        </tr></thead>
+        <tbody id="tbodyIR"></tbody>
       </table>
     </div>
   </div>
@@ -237,11 +259,15 @@ function diasEntre(a, b){
   const d1 = new Date(a+'T00:00:00'), d2 = new Date(b+'T00:00:00');
   return Math.round((d2-d1)/86400000);
 }
+// o campo `premio` (e `custo_recompra`) guarda o valor POR OPÇÃO (como é cotado na B3,
+// geralmente centavos) — o total em dinheiro é sempre esse valor × a quantidade de ações
+function premioTotal(o){ return (o.premio||0) * (o.quantidade||0); }
+function custoTotal(o){ return (o.custo_recompra||0) * (o.quantidade||0); }
 // resultado líquido só existe pra operação encerrada: prêmio inteiro, menos o custo de
 // recompra se ela foi fechada antes do vencimento pagando pra sair
 function resultadoOp(o){
   if(o.status==='aberta') return null;
-  return (o.premio||0) - (o.status==='recomprada' ? (o.custo_recompra||0) : 0);
+  return premioTotal(o) - (o.status==='recomprada' ? custoTotal(o) : 0);
 }
 function retornoPct(o){ // sobre o capital de referência (strike x quantidade)
   const base = (o.strike||0) * (o.quantidade||0);
@@ -292,20 +318,70 @@ function renderTudo(){
   renderRanking();
   renderAbertas();
   renderTabela();
+  renderIR();
+}
+
+// Regras de IR pra renda variável em opções (sempre tributável, sem a isenção dos R$20mil que
+// só vale pra ações à vista): 15% sobre o resultado líquido mensal em operações comuns, 20% se
+// abertura e fechamento caírem no mesmo dia (day trade) — os dois regimes têm compensação de
+// prejuízo separada, um não abate o outro.
+function calcularIR(){
+  const fechadas = (DATA.operacoes||[]).filter(o=>o.status!=='aberta');
+  const porRegimeMes = {comum:{}, day:{}};
+  fechadas.forEach(o=>{
+    const fech = o.data_fechamento || o.data_vencimento;
+    const mes = mesKey(fech);
+    if(!mes) return;
+    const regime = (o.data_abertura && o.data_abertura===fech) ? 'day' : 'comum';
+    porRegimeMes[regime][mes] = (porRegimeMes[regime][mes]||0) + (resultadoOp(o)||0);
+  });
+  const linhas = [];
+  [['comum',0.15],['day',0.20]].forEach(([regime,aliquota])=>{
+    const meses = Object.keys(porRegimeMes[regime]).sort();
+    let prejuizo = 0; // sempre <= 0
+    meses.forEach(mes=>{
+      const resultadoMes = porRegimeMes[regime][mes];
+      const base = resultadoMes + prejuizo;
+      const ir = base>0 ? base*aliquota : 0;
+      linhas.push({regime, mes, resultadoMes, prejuizoCompensado: prejuizo, base, aliquota, ir});
+      prejuizo = base>0 ? 0 : base;
+    });
+  });
+  return linhas.sort((a,b)=> a.mes.localeCompare(b.mes) || a.regime.localeCompare(b.regime));
+}
+
+function renderIR(){
+  const linhas = calcularIR();
+  const tb = document.getElementById('tbodyIR');
+  if(!linhas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhuma operação encerrada ainda.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = linhas.map(l=>`
+    <tr>
+      <td>${l.mes}</td>
+      <td>${l.regime==='day' ? 'Day trade' : 'Comum'}</td>
+      <td class="${l.resultadoMes>=0?'pos':'neg'}">${BRL(l.resultadoMes)}</td>
+      <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
+      <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
+      <td>${(l.aliquota*100).toFixed(0)}%</td>
+      <td><b>${BRL(l.ir)}</b></td>
+      <td class="muted">${l.base<0 ? BRL(l.base) : '—'}</td>
+    </tr>`).join('');
 }
 
 function renderStats(){
   const ops = DATA.operacoes||[];
   const fechadas = ops.filter(o=>o.status!=='aberta');
   const abertas = ops.filter(o=>o.status==='aberta');
-  const totalPremio = ops.reduce((s,o)=>s+(o.premio||0),0);
+  const totalPremio = ops.reduce((s,o)=>s+premioTotal(o),0);
   const totalRealizado = fechadas.reduce((s,o)=>s+(resultadoOp(o)||0),0);
-  const premioEmAberto = abertas.reduce((s,o)=>s+(o.premio||0),0);
+  const premioEmAberto = abertas.reduce((s,o)=>s+premioTotal(o),0);
   const foramExercidas = fechadas.filter(o=>o.status==='exercida').length;
   const taxaSucesso = fechadas.length ? (1 - foramExercidas/fechadas.length)*100 : null;
   const anualizados = fechadas.map(retornoAnualizado).filter(v=>v!=null);
   const mediaAnualizada = anualizados.length ? anualizados.reduce((a,b)=>a+b,0)/anualizados.length : null;
-  const porTipo = t => ops.filter(o=>o.tipo===t).reduce((s,o)=>s+(o.premio||0),0);
+  const porTipo = t => ops.filter(o=>o.tipo===t).reduce((s,o)=>s+premioTotal(o),0);
 
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Prêmio recebido (total)</div><div class="v">${BRL(totalPremio)}</div>
@@ -328,8 +404,8 @@ function mesKey(d){ return (d||'').slice(0,7); } // YYYY-MM
 function renderGraficoMes(){
   const ops = DATA.operacoes||[];
   const meses = [...new Set(ops.map(o=>mesKey(o.data_abertura)).filter(Boolean))].sort();
-  const put = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='PUT').reduce((s,o)=>s+(o.premio||0),0));
-  const call = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='CALL').reduce((s,o)=>s+(o.premio||0),0));
+  const put = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='PUT').reduce((s,o)=>s+premioTotal(o),0));
+  const call = meses.map(m=>ops.filter(o=>mesKey(o.data_abertura)===m && o.tipo==='CALL').reduce((s,o)=>s+premioTotal(o),0));
   if(charts.mes) charts.mes.destroy();
   charts.mes = new Chart(document.getElementById('chMes'), {
     type:'bar',
@@ -352,7 +428,7 @@ function renderRanking(){
   ops.forEach(o=>{
     if(!o.ativo) return;
     porAtivo[o.ativo] = porAtivo[o.ativo] || {premio:0, n:0};
-    porAtivo[o.ativo].premio += o.premio||0;
+    porAtivo[o.ativo].premio += premioTotal(o);
     porAtivo[o.ativo].n += 1;
   });
   const lista = Object.entries(porAtivo).sort((a,b)=>b[1].premio-a[1].premio);
@@ -374,7 +450,7 @@ function renderAbertas(){
   const hoje = hojeStr();
   document.getElementById('tbodyAbertas').innerHTML = abertas.map(o=>{
     const dias = diasEntre(hoje, o.data_vencimento);
-    const pctStrike = (o.strike && o.quantidade) ? (o.premio/(o.strike*o.quantidade)*100) : null;
+    const pctStrike = o.strike ? (o.premio/o.strike*100) : null;
     return `<tr>
       <td><b>${o.ativo}</b></td>
       <td><span class="badge ${o.tipo.toLowerCase()}">${o.tipo==='PUT'?'Put':'Call'}</span></td>
@@ -383,6 +459,7 @@ function renderAbertas(){
       <td>${BRL(o.strike)}</td>
       <td>${o.quantidade}</td>
       <td>${BRL(o.premio)}</td>
+      <td>${BRL(premioTotal(o))}</td>
       <td>${pctStrike==null?'—':PCT(pctStrike)}</td>
       <td class="acoes-cell">
         ${EDIT ? `<button class="mini ghost" onclick="abrirEncerrar(${o.id})">Encerrar</button>` : ''}
@@ -415,13 +492,13 @@ function renderTabela(){
             <option value="CALL" ${o.tipo==='CALL'?'selected':''}>Call</option>
           </select></td>
       <td><input type="date" value="${o.data_abertura||''}" ${dis} onchange="editarCampo(${o.id},'data_abertura',this.value)"></td>
-      <td><input type="date" value="${o.data_vencimento||''}" ${dis} onchange="editarCampo(${o.id},'data_vencimento',this.value)"></td>
-      <td><input type="number" step="0.01" value="${o.strike}" ${dis} onchange="editarCampo(${o.id},'strike',this.value)"></td>
+      <td><input type="date" value="${o.data_vencimento||''}" ${dis} onchange="editarCampo(${o.id},'data_vencimento',this.value)" title="Opção europeia: o fechamento sempre acontece nessa data"></td>
+      <td>${inputMoeda(o.id,'strike',o.strike,dis)}</td>
       <td><input type="number" step="1" value="${o.quantidade}" ${dis} onchange="editarCampo(${o.id},'quantidade',this.value)"></td>
-      <td><input type="number" step="0.01" value="${o.premio}" ${dis} onchange="editarCampo(${o.id},'premio',this.value)"></td>
+      <td>${inputMoeda(o.id,'premio',o.premio,dis)}</td>
+      <td>${BRL(premioTotal(o))}</td>
       <td><span class="badge ${o.status}">${rotuloStatus(o.status)}</span></td>
-      <td><input type="date" value="${o.data_fechamento||''}" ${dis} onchange="editarCampo(${o.id},'data_fechamento',this.value)"></td>
-      <td><input type="number" step="0.01" value="${o.custo_recompra}" ${dis} onchange="editarCampo(${o.id},'custo_recompra',this.value)" ${o.status!=='recomprada'?'style="opacity:.4"':''}></td>
+      <td>${inputMoeda(o.id,'custo_recompra',o.custo_recompra,dis, o.status!=='recomprada')}</td>
       <td class="${res>=0?'pos':(res<0?'neg':'')}">${res==null?'—':BRL(res)}</td>
       <td class="${anual>=0?'pos':(anual<0?'neg':'')}">${anual==null?'—':PCT(anual)}</td>
       <td class="ativo-cell"><input value="${(o.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampo(${o.id},'obs',this.value)"></td>
@@ -430,6 +507,22 @@ function renderTabela(){
       </td>
     </tr>`;
   }).join('');
+}
+
+// input de dinheiro: mostra formatado ("R$ 0,02") o tempo todo; ao focar, seleciona tudo pra
+// facilitar redigitar; ao sair do campo, editarCampo já força o re-render com o valor formatado
+function inputMoeda(id, campo, valor, disabled, apagado){
+  const dis = disabled ? 'disabled' : '';
+  const estilo = apagado ? 'style="opacity:.4"' : '';
+  return `<input type="text" inputmode="decimal" value="${BRL(valor)}" ${dis} ${estilo}
+    onfocus="this.select()" onchange="editarCampo(${id},'${campo}',this.value)">`;
+}
+// aceita "R$ 12,61", "12,61" ou "12.61" digitado à mão
+function parseMoeda(str){
+  if(str==null || str==='') return 0;
+  let s = String(str).replace(/[^\d,.-]/g,'');
+  if(s.includes(',')) s = s.replace(/\./g,'').replace(',', '.');
+  return parseFloat(s) || 0;
 }
 
 function rotuloStatus(s){
@@ -448,17 +541,22 @@ async function novaOperacao(){
   if(d.ok){ await load(); const linha=document.querySelector(`tr[data-id="${d.id}"] input`); if(linha) linha.focus(); }
 }
 
+const CAMPOS_MOEDA = ['strike','premio','custo_recompra'];
 async function editarCampo(id, campo, valor){
+  const valorNum = CAMPOS_MOEDA.includes(campo) ? parseMoeda(valor)
+                  : campo==='quantidade' ? parseFloat(valor||0) : valor;
   await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({[campo]:valor})});
+    body: JSON.stringify({[campo]:valorNum})});
   const o = (DATA.operacoes||[]).find(x=>x.id===id);
   if(o){
-    o[campo] = ['strike','quantidade','premio','custo_recompra'].includes(campo) ? parseFloat(valor||0) : valor;
+    o[campo] = valorNum;
     popularFiltros();
-    renderStats(); renderGraficoMes(); renderRanking(); renderAbertas(); renderTabela();
+    renderStats(); renderGraficoMes(); renderRanking(); renderAbertas(); renderTabela(); renderIR();
   }
 }
 
+// Opção europeia: só é exercida (ou vira pó) na data de vencimento mesmo, então o
+// fechamento sempre usa essa data — não precisa perguntar de novo
 async function abrirEncerrar(id){
   const o = (DATA.operacoes||[]).find(x=>x.id===id);
   if(!o) return;
@@ -469,14 +567,12 @@ async function abrirEncerrar(id){
   if(!status){ alert('Opção inválida.'); return; }
   let custo = 0;
   if(status==='recomprada'){
-    const c = prompt('Quanto você pagou pra recomprar (fechar) a operação?', '0');
+    const c = prompt('Quanto você pagou pra recomprar (fechar), por opção?', '0');
     if(c===null) return;
-    custo = parseFloat(c.replace(',','.'))||0;
+    custo = parseMoeda(c);
   }
-  const fech = prompt('Data de encerramento (AAAA-MM-DD):', o.data_vencimento || hojeStr());
-  if(fech===null) return;
   await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({status, custo_recompra:custo, data_fechamento:fech})});
+    body: JSON.stringify({status, custo_recompra:custo, data_fechamento:o.data_vencimento})});
   await load();
 }
 

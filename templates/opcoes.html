@@ -172,7 +172,11 @@
         <thead><tr>
           <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
           <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>Status</th><th>Custo recompra unit.</th>
-          <th>Resultado</th><th>Retorno anualiz.</th><th>Obs.</th><th></th>
+          <th title="Só pra Call exercida: o preço médio que você já tinha nessa ação antes de ser exercido">Preço médio (ação)</th>
+          <th>Resultado (opção)</th>
+          <th title="Só pra Call exercida com preço médio preenchido: (strike − preço médio) × quantidade">Lucro venda ação</th>
+          <th title="Lucro da venda da ação + prêmio da opção">Lucro total</th>
+          <th>Retorno anualiz.</th><th>Obs.</th><th></th>
         </tr></thead>
         <tbody id="tbodyHist"></tbody>
       </table>
@@ -268,6 +272,17 @@ function custoTotal(o){ return (o.custo_recompra||0) * (o.quantidade||0); }
 function resultadoOp(o){
   if(o.status==='aberta') return null;
   return premioTotal(o) - (o.status==='recomprada' ? custoTotal(o) : 0);
+}
+// só faz sentido pra CALL exercida: você vendeu a ação que já tinha pelo strike, então o
+// lucro dessa venda (separado do prêmio da opção) é (strike - preço médio) × quantidade
+function lucroVendaAcao(o){
+  if(o.tipo!=='CALL' || o.status!=='exercida' || !o.preco_medio) return null;
+  return (o.strike - o.preco_medio) * (o.quantidade||0);
+}
+function lucroTotalOperacao(o){
+  const lv = lucroVendaAcao(o);
+  if(lv==null) return null;
+  return lv + premioTotal(o);
 }
 function retornoPct(o){ // sobre o capital de referência (strike x quantidade)
   const base = (o.strike||0) * (o.quantidade||0);
@@ -478,12 +493,15 @@ function renderTabela(){
   const ops = opsFiltradas().slice().sort((a,b)=>(b.data_abertura||'').localeCompare(a.data_abertura||''));
   const tb = document.getElementById('tbodyHist');
   if(!ops.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="14">Nenhuma operação encontrada.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="17">Nenhuma operação encontrada.</td></tr>`;
     return;
   }
   tb.innerHTML = ops.map(o=>{
     const res = resultadoOp(o);
     const anual = retornoAnualizado(o);
+    const relevantePM = o.tipo==='CALL' && o.status==='exercida';
+    const lucroVenda = lucroVendaAcao(o);
+    const lucroTotal = lucroTotalOperacao(o);
     const dis = EDIT ? '' : 'disabled';
     return `<tr data-id="${o.id}">
       <td class="ativo-cell"><input value="${o.ativo}" ${dis} onchange="editarCampo(${o.id},'ativo',this.value)"></td>
@@ -499,7 +517,10 @@ function renderTabela(){
       <td>${BRL(premioTotal(o))}</td>
       <td><span class="badge ${o.status}">${rotuloStatus(o.status)}</span></td>
       <td>${inputMoeda(o.id,'custo_recompra',o.custo_recompra,dis, o.status!=='recomprada')}</td>
+      <td>${inputMoeda(o.id,'preco_medio',o.preco_medio,dis, !relevantePM)}</td>
       <td class="${res>=0?'pos':(res<0?'neg':'')}">${res==null?'—':BRL(res)}</td>
+      <td class="${lucroVenda>=0?'pos':(lucroVenda<0?'neg':'')}">${lucroVenda==null?'—':BRL(lucroVenda)}</td>
+      <td class="${lucroTotal>=0?'pos':(lucroTotal<0?'neg':'')}">${lucroTotal==null?'—':BRL(lucroTotal)}</td>
       <td class="${anual>=0?'pos':(anual<0?'neg':'')}">${anual==null?'—':PCT(anual)}</td>
       <td class="ativo-cell"><input value="${(o.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampo(${o.id},'obs',this.value)"></td>
       <td class="acoes-cell">
@@ -541,7 +562,7 @@ async function novaOperacao(){
   if(d.ok){ await load(); const linha=document.querySelector(`tr[data-id="${d.id}"] input`); if(linha) linha.focus(); }
 }
 
-const CAMPOS_MOEDA = ['strike','premio','custo_recompra'];
+const CAMPOS_MOEDA = ['strike','premio','custo_recompra','preco_medio'];
 async function editarCampo(id, campo, valor){
   const valorNum = CAMPOS_MOEDA.includes(campo) ? parseMoeda(valor)
                   : campo==='quantidade' ? parseFloat(valor||0) : valor;

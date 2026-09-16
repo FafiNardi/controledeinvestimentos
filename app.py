@@ -138,10 +138,12 @@ class RentMov(db.Model):
 
 
 class OpcaoOp(db.Model):
-    """Venda coberta de put/call (geração de renda com opções). O prêmio é sempre
-    recebido inteiro na abertura; o campo `status` só registra o que aconteceu no
-    fim: virou pó (expirou sem exercício), foi exercida, ou foi recomprada antes
-    do vencimento (aí sim há um custo pra fechar, que abate do prêmio)."""
+    """Venda coberta de put/call (geração de renda com opções). `premio` e
+    `custo_recompra` guardam o valor POR OPÇÃO (como é cotado na B3, geralmente
+    centavos) — o total em dinheiro é esse valor × `quantidade`, calculado no
+    front-end. O campo `status` só registra o que aconteceu no fim: virou pó
+    (expirou sem exercício), foi exercida, ou foi recomprada antes do
+    vencimento (aí sim há um custo pra fechar, que abate do prêmio)."""
     id = db.Column(db.Integer, primary_key=True)
     carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
     ativo = db.Column(db.String(40), nullable=False, default="")
@@ -150,10 +152,14 @@ class OpcaoOp(db.Model):
     data_vencimento = db.Column(db.String(10), default="")   # YYYY-MM-DD
     strike = db.Column(db.Float, default=0)
     quantidade = db.Column(db.Float, default=0)   # nº de ações cobertas (não "contratos")
-    premio = db.Column(db.Float, default=0)       # total recebido na abertura
+    premio = db.Column(db.Float, default=0)       # valor por opção, recebido na abertura
     status = db.Column(db.String(12), default="aberta")  # aberta, po, exercida, recomprada
     data_fechamento = db.Column(db.String(10), default="")
-    custo_recompra = db.Column(db.Float, default=0)
+    custo_recompra = db.Column(db.Float, default=0)   # valor por opção, pago pra fechar antes do vencimento
+    # preço médio que o usuário já tinha na ação ANTES dessa call ser exercida — só faz
+    # sentido pra CALL exercida (aí ele vendeu a ação pelo strike): dá pra calcular o
+    # lucro da venda da ação (strike - preco_medio) além do prêmio da opção em si
+    preco_medio = db.Column(db.Float, default=0)
     obs = db.Column(db.Text, default="")
     ordem = db.Column(db.Integer, default=0)
 
@@ -879,7 +885,7 @@ def api_opcoes(cid):
         "data_abertura": o.data_abertura, "data_vencimento": o.data_vencimento,
         "strike": o.strike or 0, "quantidade": o.quantidade or 0, "premio": o.premio or 0,
         "status": o.status or "aberta", "data_fechamento": o.data_fechamento or "",
-        "custo_recompra": o.custo_recompra or 0, "obs": o.obs or "",
+        "custo_recompra": o.custo_recompra or 0, "preco_medio": o.preco_medio or 0, "obs": o.obs or "",
     } for o in ops]
     return jsonify({
         "operacoes": out,
@@ -907,8 +913,9 @@ def api_opcoes_add(cid):
 
 
 OPCAO_FIELDS = {"ativo", "tipo", "data_abertura", "data_vencimento", "strike",
-                "quantidade", "premio", "status", "data_fechamento", "custo_recompra", "obs"}
-OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra"}
+                "quantidade", "premio", "status", "data_fechamento", "custo_recompra",
+                "preco_medio", "obs"}
+OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra", "preco_medio"}
 
 
 @app.route("/api/opcoes/<int:oid>", methods=["PUT", "DELETE"])
@@ -962,6 +969,7 @@ def ensure_schema():
     add("rent_ativo", "classe", "classe VARCHAR(30) DEFAULT ''")
     add("rent_ativo", "inicio_ano", "inicio_ano INTEGER")
     add("rent_ativo", "inicio_mes", "inicio_mes INTEGER")
+    add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
     if insp.has_table("rent_ativo"):
         cols = [c["name"] for c in insp.get_columns("rent_ativo")]
         if "classe" in cols and "is_caixa" in cols:

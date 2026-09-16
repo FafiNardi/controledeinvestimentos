@@ -519,9 +519,12 @@ let PROV_MODO = 'classe';       // 'classe' ou 'ativo' — como agrupar/escolher
 let PROV_METRICA = 'proventos'; // 'proventos' (só o que foi pago à parte) ou 'rendimento' (inclui valorização embutida no saldo)
 let PROV_CLASSES_SEL = null;    // Set de classes marcadas (modo 'classe'); null = ainda não mexeu (mostra todas)
 let PROV_ATIVOS_SEL = null;     // Set de ativo_id marcados (modo 'ativo'); null = ainda não mexeu (mostra todos)
+// reordenada pra afastar o teal do verde-esmeralda (ficavam um do lado do outro e, sendo os dois
+// tons de verde, confundiam na legenda/gráfico) — com as 8 classes em R$, cada uma cai numa cor
+// bem diferente das vizinhas; o verde-esmeralda só aparece se tiver 9+ classes/ativos marcados
 const PROV_CORES = ['rgba(45,212,191,.85)','rgba(59,130,246,.85)','rgba(245,183,84,.85)',
-  'rgba(248,113,113,.85)','rgba(167,139,250,.85)','rgba(52,211,153,.85)','rgba(251,146,60,.85)',
-  'rgba(96,165,250,.85)','rgba(232,121,249,.85)','rgba(148,163,184,.85)'];
+  'rgba(248,113,113,.85)','rgba(167,139,250,.85)','rgba(232,121,249,.85)','rgba(251,146,60,.85)',
+  'rgba(96,165,250,.85)','rgba(52,211,153,.85)','rgba(148,163,184,.85)'];
 function corClasse(classe, lista){ return PROV_CORES[Math.max(0,lista.indexOf(classe)) % PROV_CORES.length]; }
 const PROV_COR_SEM_CLASSE = 'rgba(148,163,184,.85)'; // mesmo sufixo ,.85) das outras, pro highlight do chip continuar funcionando
 // cor de uma "chave" na aba Proventos: no modo por classe, cada classe tem sua cor (por posição

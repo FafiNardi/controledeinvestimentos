@@ -1154,6 +1154,12 @@ function mkChart(id, cfg){
 }
 const GRID = {color:'rgba(255,255,255,.06)'};
 const TICKS = {color:'#8a9bb0'};
+// pinta o trecho da linha de vermelho quando o retorno acumulado está negativo (e volta pro azul
+// assim que ele fica positivo de novo) — mesma lógica de cor que as barras de "Evolução do retorno"
+// já usam, só que aplicada por trecho da linha em vez de por barra
+const segCorLinha = ctx => (ctx.p0.parsed.y<0 || ctx.p1.parsed.y<0) ? '#ef4444' : '#3b82f6';
+const segCorArea = ctx => (ctx.p0.parsed.y<0 || ctx.p1.parsed.y<0) ? 'rgba(239,68,68,.12)' : 'rgba(59,130,246,.12)';
+const pontoCorAcumulado = ctx => (ctx.parsed && ctx.parsed.y<0) ? '#ef4444' : '#3b82f6';
 const fmtPctChart = v => (v==null?0:v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
 const fmtMoedaChart = v => BRL(v==null?0:v);
 // plugin genérico pra gráfico de barras empilhadas: escreve o total (soma de todas as classes/
@@ -1224,8 +1230,9 @@ function renderCharts(){
     }
   });
   mkChart('chAcum',{type:'line',data:{labels:keysAno,
-    datasets:[{data:valoresAno,borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
-      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:3,pointHoverRadius:6,tension:.2}]},
+    datasets:[{data:valoresAno,borderColor:'#3b82f6',pointBackgroundColor:pontoCorAcumulado,
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:3,pointHoverRadius:6,tension:.2,
+      segment:{borderColor:segCorLinha,backgroundColor:segCorArea}}]},
     options:{maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
@@ -1235,8 +1242,9 @@ function renderCharts(){
   const janelaValor = document.getElementById('selJanela').value;
   const keysJanela = janelaValor ? keys.slice(-parseInt(janelaValor)) : keys;
   mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
-    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:'#3b82f6',
-      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:2,pointHoverRadius:5,tension:.2}]},
+    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:pontoCorAcumulado,
+      backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:2,pointHoverRadius:5,tension:.2,
+      segment:{borderColor:segCorLinha,backgroundColor:segCorArea}}]},
     options:{maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},

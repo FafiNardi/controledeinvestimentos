@@ -122,7 +122,12 @@
   .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
           box-shadow:0 1px 2px rgba(0,0,0,.12)}
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:0}
-  .tbl-scroll{overflow-x:auto}
+  /* A régua de cabeçalho só fica "congelada" de verdade dentro de uma caixa que realmente rola
+     sozinha (como o Excel prende no painel da própria planilha, não na janela toda) — por isso
+     a ficha ganha um teto de altura e rolagem vertical própria aqui, em vez de esticar junto com
+     a página inteira. Enquanto ainda há linhas de ativo por rolar dentro dessa caixa, a régua
+     fica no topo; assim que a lista acaba, ela sai de cena com o resto do conteúdo. */
+  .tbl-scroll{overflow:auto;max-height:min(620px, 65vh)}
   .tbl-scroll table{width:auto}
   th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.5px;
@@ -205,9 +210,9 @@
   <div class="topbar-row">
     <div class="brand"><span class="mark"></span>Rentabilidade</div>
     <nav class="tabs-nav">
-      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
       <button class="tab-link on">📈 Rentabilidade</button>
       <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
     </nav>
     <div class="topbar-spacer"></div>
     <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
@@ -1554,7 +1559,47 @@ function makeResizable(){
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+    r.addEventListener('dblclick', e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      autoajustarColuna(idx, th);
+    });
   });
+}
+
+// duplo clique na régua da coluna = "autofit" (como no Excel): mede o texto de cada célula
+// (usando a fonte de verdade de cada uma — cabeçalho e dado têm fontes diferentes) e aplica
+// a maior largura encontrada, com uma folguinha pra não cortar por 1px
+const _canvasMedida = document.createElement('canvas');
+function medirTexto(texto, cs){
+  const ctx = _canvasMedida.getContext('2d');
+  const t = cs.textTransform === 'uppercase' ? texto.toUpperCase() : texto;
+  ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const letterSpacing = parseFloat(cs.letterSpacing) || 0;
+  return ctx.measureText(t).width + Math.max(0, t.length-1) * letterSpacing;
+}
+function autoajustarColuna(idx, th){
+  const table = document.getElementById('tbl');
+  const celulas = [th, ...table.querySelectorAll(`tbody tr td:nth-child(${idx+1})`)];
+  let maxLargura = 0;
+  celulas.forEach(cel=>{
+    const campo = cel.querySelector('input,select');
+    let texto;
+    if(campo && campo.tagName === 'SELECT'){
+      texto = campo.options[campo.selectedIndex] ? campo.options[campo.selectedIndex].text : '';
+    } else if(campo){
+      texto = campo.value;
+    } else {
+      texto = cel.textContent.trim();
+    }
+    const cs = getComputedStyle(campo || cel);
+    const largura = medirTexto(texto || '', cs);
+    if(largura > maxLargura) maxLargura = largura;
+  });
+  const paddingCelula = 22;      // padding esquerdo+direito da th/td (9px+10px arredondado)
+  const espacoResizer = 12;      // não deixa o texto colar na régua de redimensionar
+  const nova = Math.max(28, Math.ceil(maxLargura) + paddingCelula + espacoResizer);
+  aplicarLarguraColuna(idx, nova, true);
 }
 
 document.getElementById('btnTema').textContent =

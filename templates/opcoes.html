@@ -126,9 +126,9 @@
   <div class="topbar-row">
     <div class="brand"><span class="mark"></span>Opções</div>
     <nav class="tabs-nav">
-      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
       <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
       <button class="tab-link on">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
     </nav>
     <div class="topbar-spacer"></div>
     <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
@@ -151,7 +151,7 @@
       <div class="chart-wrap"><canvas id="chMes"></canvas></div>
     </div>
     <div class="chartbox"><h3>Ranking por ativo (prêmio total)</h3>
-      <div id="ranking" style="max-height:230px;overflow-y:auto"></div>
+      <div id="ranking" style="max-height:230px;overflow-y:auto;padding-right:10px;scrollbar-gutter:stable"></div>
     </div>
   </div>
 

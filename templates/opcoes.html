@@ -218,16 +218,19 @@
     imposto é sempre devido sobre o resultado líquido do mês (soma dos ganhos e perdas de todas
     as operações de opções encerradas naquele mês), 15% em operações comuns ou 20% se abertura e
     fechamento caírem no mesmo dia (day trade). Prejuízo de um mês abate o lucro dos meses
-    seguintes, dentro do mesmo regime. Pago via DARF (código 6015), até o último dia útil do mês
-    seguinte. Isto é uma estimativa pra te ajudar a acompanhar — confirme sempre no e-CAC ou com
-    seu contador antes de pagar.
+    seguintes, dentro do mesmo regime. <b>DARF abaixo de R$10 não precisa ser paga</b> — o valor
+    fica acumulado e soma com o do(s) mês(es) seguinte(s) até bater R$10. Pago via DARF (código
+    6015), até o último dia útil do mês seguinte. Isto é uma estimativa pra te ajudar a
+    acompanhar — confirme sempre no e-CAC ou com seu contador antes de pagar.
   </p>
   <div class="ledger">
     <div class="tbl-scroll">
       <table>
         <thead><tr>
           <th>Mês</th><th>Regime</th><th>Resultado do mês</th><th>Prejuízo compensado</th>
-          <th>Base de cálculo</th><th>Alíquota</th><th>IR devido (DARF)</th><th>Saldo a compensar</th>
+          <th>Base de cálculo</th><th>Alíquota</th><th>IR calculado</th>
+          <th title="Valor que ainda não bateu R$10 — não precisa pagar agora, some com o próximo mês">Acumulado (&lt; R$10)</th>
+          <th>IR devido (DARF)</th><th>Pagamento</th>
         </tr></thead>
         <tbody id="tbodyIR"></tbody>
       </table>
@@ -379,16 +382,25 @@ function calcularIR(){
     const regime = (o.data_abertura && o.data_abertura===fech) ? 'day' : 'comum';
     porRegimeMes[regime][mes] = (porRegimeMes[regime][mes]||0) + (resultadoOp(o)||0);
   });
+  // A Receita dispensa o recolhimento de DARF abaixo de R$10: o valor não desaparece,
+  // fica acumulado (somado ao imposto do(s) mês(es) seguinte(s), dentro do mesmo regime)
+  // até que a soma bata R$10 — só aí vira uma DARF de verdade, com o valor acumulado inteiro.
+  const MINIMO_DARF = 10;
   const linhas = [];
   [['comum',0.15],['day',0.20]].forEach(([regime,aliquota])=>{
     const meses = Object.keys(porRegimeMes[regime]).sort();
-    let prejuizo = 0; // sempre <= 0
+    let prejuizo = 0;     // sempre <= 0
+    let irPendente = 0;   // imposto já calculado mas ainda abaixo de R$10, aguardando somar
     meses.forEach(mes=>{
       const resultadoMes = porRegimeMes[regime][mes];
       const base = resultadoMes + prejuizo;
-      const ir = base>0 ? base*aliquota : 0;
-      linhas.push({regime, mes, resultadoMes, prejuizoCompensado: prejuizo, base, aliquota, ir});
+      const irCalculado = base>0 ? base*aliquota : 0;
+      const disponivel = irCalculado + irPendente;
+      const devido = disponivel >= MINIMO_DARF ? disponivel : 0;
+      linhas.push({regime, mes, resultadoMes, prejuizoCompensado: prejuizo, base, aliquota,
+        irCalculado, irPendenteAnterior: irPendente, devido});
       prejuizo = base>0 ? 0 : base;
+      irPendente = devido>0 ? 0 : disponivel;
     });
   });
   return linhas.sort((a,b)=> a.mes.localeCompare(b.mes) || a.regime.localeCompare(b.regime));
@@ -398,20 +410,52 @@ function renderIR(){
   const linhas = calcularIR();
   const tb = document.getElementById('tbodyIR');
   if(!linhas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhuma operação encerrada ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma operação encerrada ainda.</td></tr>`;
     return;
   }
-  tb.innerHTML = linhas.map(l=>`
-    <tr>
+  tb.innerHTML = linhas.map(l=>{
+    const pago = (DATA.darfs||[]).find(d=>d.mes===l.mes && d.regime===l.regime);
+    let statusHtml = '<span class="muted">—</span>';
+    if(l.devido>0){
+      if(pago){
+        statusHtml = EDIT
+          ? `<button class="mini ghost" style="color:var(--green);border-color:var(--green)"
+               title="Pago em ${fmtData(pago.data_pagamento)} · clique pra desmarcar"
+               onclick="desmarcarDarf(${pago.id})">✓ Pago em ${fmtData(pago.data_pagamento)}</button>`
+          : `<span class="badge po">✓ Pago em ${fmtData(pago.data_pagamento)}</span>`;
+      } else {
+        statusHtml = EDIT
+          ? `<button class="mini ghost" onclick="marcarDarf('${l.mes}','${l.regime}',${l.devido})">Marcar como paga</button>`
+          : `<span class="badge aberta">Pendente</span>`;
+      }
+    }
+    return `<tr>
       <td>${l.mes}</td>
       <td>${l.regime==='day' ? 'Day trade' : 'Comum'}</td>
       <td class="${l.resultadoMes>=0?'pos':'neg'}">${BRL(l.resultadoMes)}</td>
       <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
       <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
       <td>${(l.aliquota*100).toFixed(0)}%</td>
-      <td><b>${BRL(l.ir)}</b></td>
-      <td class="muted">${l.base<0 ? BRL(l.base) : '—'}</td>
-    </tr>`).join('');
+      <td>${BRL(l.irCalculado)}</td>
+      <td class="muted">${(l.devido===0 && (l.irCalculado>0 || l.irPendenteAnterior>0)) ? 'aguardando: '+BRL(l.irCalculado+l.irPendenteAnterior) : '—'}</td>
+      <td><b>${BRL(l.devido)}</b></td>
+      <td>${statusHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function marcarDarf(mes, regime, valor){
+  const hoje = hojeStr();
+  const data = prompt('Data em que você pagou essa DARF (AAAA-MM-DD):', hoje);
+  if(data===null) return;
+  await fetch(`/api/carteira/${CID}/darfs`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mes, regime, data_pagamento:data, valor_pago:valor})});
+  await load();
+}
+async function desmarcarDarf(id){
+  if(!confirm('Desmarcar essa DARF como paga?')) return;
+  await fetch('/api/darfs/'+id, {method:'DELETE'});
+  await load();
 }
 
 function renderStats(){

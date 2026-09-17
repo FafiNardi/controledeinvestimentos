@@ -82,6 +82,7 @@ class Carteira(db.Model):
     # com dado de Rentabilidade tinha sido excluída ainda.
     rentativos = db.relationship("RentAtivo", cascade="all, delete-orphan")
     opcoes = db.relationship("OpcaoOp", cascade="all, delete-orphan")
+    darfs = db.relationship("DarfPagamento", cascade="all, delete-orphan")
 
 
 class Asset(db.Model):
@@ -166,6 +167,19 @@ class OpcaoOp(db.Model):
     custo_exercicio = db.Column(db.Float, default=0)
     obs = db.Column(db.Text, default="")
     ordem = db.Column(db.Integer, default=0)
+
+
+class DarfPagamento(db.Model):
+    """Registro manual de 'já paguei essa DARF' — mês+regime da tabela de Imposto de
+    Renda da aba Opções. Não guarda o valor calculado (isso é sempre recalculado a
+    partir das operações); só a confirmação de pagamento, pra virar um check visual."""
+    id = db.Column(db.Integer, primary_key=True)
+    carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
+    mes = db.Column(db.String(7), nullable=False)     # YYYY-MM
+    regime = db.Column(db.String(6), nullable=False)  # comum ou day
+    data_pagamento = db.Column(db.String(10), default="")
+    valor_pago = db.Column(db.Float, default=0)
+    __table_args__ = (db.UniqueConstraint("carteira_id", "mes", "regime"),)
 
 
 @login_manager.user_loader
@@ -425,6 +439,7 @@ def api_delete_carteira(cid):
     RentAtivo.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     Asset.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     OpcaoOp.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
+    DarfPagamento.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     db.session.delete(c)
     db.session.commit()
     return jsonify({"ok": True})
@@ -892,8 +907,12 @@ def api_opcoes(cid):
         "custo_recompra": o.custo_recompra or 0, "preco_medio": o.preco_medio or 0,
         "custo_exercicio": o.custo_exercicio or 0, "obs": o.obs or "",
     } for o in ops]
+    darfs = DarfPagamento.query.filter_by(carteira_id=cid).all()
+    darfs_out = [{"id": d.id, "mes": d.mes, "regime": d.regime,
+                  "data_pagamento": d.data_pagamento or "", "valor_pago": d.valor_pago or 0} for d in darfs]
     return jsonify({
         "operacoes": out,
+        "darfs": darfs_out,
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
         "editavel": c.user_id == current_user.id,
     })
@@ -950,6 +969,39 @@ def api_opcao_editar(oid):
                 o.status = v
         else:
             setattr(o, k, v or "")
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/carteira/<int:cid>/darfs", methods=["POST"])
+@login_required
+def api_darf_marcar(cid):
+    """Marca (ou atualiza) uma DARF mês+regime como paga."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True) or {}
+    mes = (d.get("mes") or "").strip()
+    regime = d.get("regime")
+    if not mes or regime not in ("comum", "day"):
+        return jsonify({"erro": "informe mês e regime válidos"}), 400
+    reg = DarfPagamento.query.filter_by(carteira_id=cid, mes=mes, regime=regime).first()
+    if not reg:
+        reg = DarfPagamento(carteira_id=cid, mes=mes, regime=regime)
+        db.session.add(reg)
+    reg.data_pagamento = d.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d")
+    reg.valor_pago = float(d.get("valor_pago") or 0)
+    db.session.commit()
+    return jsonify({"ok": True, "id": reg.id})
+
+
+@app.route("/api/darfs/<int:did>", methods=["DELETE"])
+@login_required
+def api_darf_desmarcar(did):
+    reg = db.session.get(DarfPagamento, did)
+    if not reg:
+        abort(404)
+    require_owner(db.session.get(Carteira, reg.carteira_id))
+    db.session.delete(reg)
     db.session.commit()
     return jsonify({"ok": True})
 

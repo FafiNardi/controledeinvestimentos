@@ -497,7 +497,12 @@ def api_add_asset(cid):
         if q["preco"]:
             a.preco, a.vpa, a.pvp, a.dy = q["preco"], q["vpa"] or 0, q["pvp"] or 0, q["dy"] or 0
             a.updated_at = datetime.now().isoformat(timespec="seconds")
-            db.session.commit()
+        else:
+            # não achou cotação de verdade (ex.: usuário digitou um nome tipo "Fundo DI" ou
+            # "Tesouro Selic 2029", não um ticker de bolsa) — vira editável na hora, senão o
+            # preço fica travado em R$0,00 pra sempre sem nenhum jeito de corrigir
+            a.manual = 1
+        db.session.commit()
     return jsonify({"ok": True, "id": a.id})
 
 

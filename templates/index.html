@@ -367,7 +367,8 @@ function renderRows(){
       <td><span class="tick">${a.ticker}</span>${a.manual?' <span class="muted">✎</span>':''}</td>
       <td>${a.manual
             ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="${MOEDA==='USD'?'US$ 0,00':'R$ 0,00'}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',smartNum(this.value))">`
-            : BRL(a.preco)}</td>
+            : (a.preco ? BRL(a.preco)
+              : (EDIT ? `<button class="ghost" style="padding:3px 8px;font-size:11px" title="Não achei cotação pra esse ticker — clique pra poder digitar o preço na mão" onclick="definirPrecoManual(${a.id})">Definir preço</button>` : '—'))}</td>
       <td><input type="text" class="vpa-inp" value="${a.vpa?BRL(a.vpa):''}" placeholder="—" ${dis} onfocus="this.select()" onchange="updVpa(${a.id},this.value)"></td>
       <td class="muted">${a.pvp?NUM(a.pvp):'—'}</td>
       <td class="muted">${a.dy?NUM(a.dy)+'%':'—'}</td>
@@ -405,6 +406,14 @@ function upd(id, field, value){
     body: JSON.stringify({[field]: value})})
     .catch(()=>console.error('Falha ao salvar', field, id));
   agendarSincronizacao();
+}
+async function definirPrecoManual(id){
+  // ao contrário do upd() otimista, espera confirmar e recarrega na hora — senão o botão
+  // continua ali por até 1,5s (o intervalo da sincronização em segundo plano) parecendo
+  // que o clique não fez nada
+  await fetch('/api/assets/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({manual: 1})});
+  await load();
 }
 function updVpa(id, value){
   const num = smartNum(value);

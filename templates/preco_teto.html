@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preço Teto • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --gold:#eab308;
+    --page-a:var(--green); --page-b:var(--gold); --tab-txt-on:#04211d;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --gold:#a16207;
+    --tab-txt-on:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .num,td,td input,td select{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  select,input,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.mini{padding:4px 8px;font-size:11.5px;border-radius:6px}
+  .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
+            border-radius:20px;font-size:11px;font-weight:700}
+
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select{max-width:240px}
+
+  .wrap{padding:0 24px 40px}
+  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap;align-items:stretch}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+        padding:10px 14px;min-width:170px;flex:1}
+  .stat .k{font-size:10.5px;color:var(--muted);white-space:nowrap;font-weight:700;
+           text-transform:uppercase;letter-spacing:.04em}
+  .stat .v{font-size:19px;font-weight:700;margin-top:5px;white-space:nowrap}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .muted{color:var(--muted)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
+     text-transform:uppercase;letter-spacing:.04em}
+  th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td input,td select{width:100%;min-width:80px;text-align:center;padding:5px;border-radius:6px;
+    font-size:12px;border:1px solid transparent;background:transparent;color:var(--txt)}
+  td input:hover{border-color:var(--line)}
+  td input:focus{border-color:var(--accent);background:var(--panel2);outline:0}
+  td.ativo-cell{text-align:left;font-weight:700}
+  .empty-row td{text-align:center;color:var(--muted);padding:20px}
+  .col-div{border-left:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Preço Teto</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link on">🏷️ Preço Teto</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+    <span id="roBadge"></span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stats" id="stats"></div>
+
+  <div class="group-label">Preço teto por ativo</div>
+  <p class="muted" style="font-size:12px;max-width:900px;margin:0 0 4px">
+    Preencha as premissas de cada método pros ativos que você tem no Rebalanceamento — o preço
+    teto é recalculado na hora. <b style="color:var(--green)">Bazin</b> = dividendos dos últimos
+    12 meses ÷ yield mínimo desejado. <b style="color:var(--gold)">Barsi</b> = soma dos dividendos
+    dos últimos 60 meses ÷ 5 (média anual) ÷ yield mínimo desejado.
+  </p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th rowspan="2">Ativo</th>
+            <th rowspan="2">Preço atual</th>
+            <th class="grp-bazin col-div" colspan="4">Bazin</th>
+            <th class="grp-barsi col-div" colspan="4">Barsi</th>
+          </tr>
+          <tr>
+            <th class="col-div">Dividendos 12m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
+            <th class="col-div">Soma dividendos 60m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyAtivos"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let CID = null, DATA = { ativos: [] }, EDIT = false, MOEDA = 'BRL';
+
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const PCT = v => v==null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+
+async function load(){
+  const r = await fetch('/api/carteira/'+CID+'/preco-teto');
+  DATA = await r.json();
+  EDIT = DATA.editavel;
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  document.getElementById('roBadge').innerHTML = EDIT ? '' :
+    `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
+  renderTudo();
+}
+
+// ---------------------------------------------------------------- cálculos
+
+// 6% é o padrão do próprio método (Barsi/Bazin) — igual ao que já aparece pré-preenchido no
+// campo de yield mínimo, então o cálculo tem que respeitar esse padrão mesmo se o usuário
+// nunca tiver tocado nesse campo especificamente (só editado o campo de dividendos ao lado)
+function tetoBazin(dados){
+  const div12 = dados.dividendos_12m || 0;
+  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : 6;
+  if(!div12 || !yield_) return null;
+  return div12 / (yield_/100);
+}
+function tetoBarsi(dados){
+  const div60 = dados.dividendos_60m || 0;
+  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : 6;
+  if(!div60 || !yield_) return null;
+  const mediaAnual = div60 / 5;
+  return mediaAnual / (yield_/100);
+}
+function distancia(teto, precoAtual){
+  if(teto==null || !precoAtual) return null;
+  return (teto - precoAtual) / precoAtual * 100;
+}
+
+function renderTudo(){
+  renderStats();
+  renderTabela();
+}
+
+function renderStats(){
+  const ativos = DATA.ativos||[];
+  let acimaDoTeto = 0, comTetoDefinido = 0;
+  ativos.forEach(a=>{
+    const tb = tetoBazin(a.premissas.bazin||{});
+    const tr = tetoBarsi(a.premissas.barsi||{});
+    const melhorTeto = tb!=null ? tb : tr;
+    if(melhorTeto!=null){
+      comTetoDefinido++;
+      if(a.preco >= melhorTeto) acimaDoTeto++;
+    }
+  });
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="k">Ativos com preço teto definido</div><div class="v">${comTetoDefinido}</div>
+      <div class="sub">de ${ativos.length} no Rebalanceamento</div></div>
+    <div class="stat"><div class="k">No ponto de vender call</div>
+      <div class="v" style="color:var(--green)">${acimaDoTeto}</div>
+      <div class="sub">preço atual já bateu ou passou do teto</div></div>
+  `;
+}
+
+function inputPremissa(assetId, metodo, campo, valor, dis){
+  return `<input type="text" inputmode="decimal" value="${valor!=null && valor!==0 ? valor : ''}"
+    ${dis} onfocus="this.select()" onchange="salvarPremissa(${assetId},'${metodo}','${campo}',this.value)">`;
+}
+
+function renderTabela(){
+  const ativos = DATA.ativos||[];
+  const tb = document.getElementById('tbodyAtivos');
+  if(!ativos.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
+    return;
+  }
+  const dis = EDIT ? '' : 'disabled';
+  tb.innerHTML = ativos.map(a=>{
+    const bazinDados = a.premissas.bazin || {};
+    const barsiDados = a.premissas.barsi || {};
+    const tb_ = tetoBazin(bazinDados);
+    const tr_ = tetoBarsi(barsiDados);
+    const distB = distancia(tb_, a.preco);
+    const distR = distancia(tr_, a.preco);
+    return `<tr>
+      <td class="ativo-cell">${a.ticker}</td>
+      <td>${BRL(a.preco)}</td>
+      <td class="col-div">${inputPremissa(a.id,'bazin','dividendos_12m',bazinDados.dividendos_12m,dis)}</td>
+      <td>${inputPremissa(a.id,'bazin','yield_minimo',bazinDados.yield_minimo!=null?bazinDados.yield_minimo:6,dis)}</td>
+      <td>${tb_==null?'—':BRL(tb_)}</td>
+      <td class="${distB>=0?'pos':(distB<0?'neg':'')}">${PCT(distB)}</td>
+      <td class="col-div">${inputPremissa(a.id,'barsi','dividendos_60m',barsiDados.dividendos_60m,dis)}</td>
+      <td>${inputPremissa(a.id,'barsi','yield_minimo',barsiDados.yield_minimo!=null?barsiDados.yield_minimo:6,dis)}</td>
+      <td>${tr_==null?'—':BRL(tr_)}</td>
+      <td class="${distR>=0?'pos':(distR<0?'neg':'')}">${PCT(distR)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------- ações
+
+async function salvarPremissa(assetId, metodo, campo, valor){
+  let s = String(valor).replace(/[^\d,.-]/g,'');
+  if(s.includes(',')) s = s.replace(/\./g,'').replace(',', '.');
+  const num = parseFloat(s) || 0;
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(!a) return;
+  a.premissas[metodo] = a.premissas[metodo] || {};
+  a.premissas[metodo][campo] = num;
+  await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({asset_id:assetId, metodo, dados:a.premissas[metodo]})});
+  renderTudo();
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

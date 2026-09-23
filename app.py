@@ -102,6 +102,20 @@ class Asset(db.Model):
     vpa_manual = db.Column(db.Integer, default=0)
     ordem = db.Column(db.Integer, default=0)
     updated_at = db.Column(db.String(40), default="")
+    premissas_teto = db.relationship("PrecoTetoPremissa", cascade="all, delete-orphan")
+
+
+class PrecoTetoPremissa(db.Model):
+    """Premissas que o usuário informa pra calcular o preço teto de um ativo por um
+    método específico (Bazin, Barsi, e outros que vierem depois). Os campos que cada
+    método precisa mudam (Bazin usa dividendo de 12 meses, Barsi usa soma de 60 meses),
+    então ficam guardados livres num JSON em vez de uma coluna fixa por campo — assim dá
+    pra "encaixar" um método novo sem alterar o schema do banco."""
+    id = db.Column(db.Integer, primary_key=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey("asset.id"), nullable=False)
+    metodo = db.Column(db.String(20), nullable=False)  # bazin, barsi, ...
+    dados_json = db.Column(db.Text, default="{}")
+    __table_args__ = (db.UniqueConstraint("asset_id", "metodo"),)
 
 
 class RentAtivo(db.Model):
@@ -437,6 +451,10 @@ def api_delete_carteira(cid):
     if ativo_ids:
         RentMov.query.filter(RentMov.ativo_id.in_(ativo_ids)).delete(synchronize_session=False)
     RentAtivo.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
+    asset_ids = [row[0] for row in Asset.query.filter_by(carteira_id=cid)
+                 .with_entities(Asset.id).all()]
+    if asset_ids:
+        PrecoTetoPremissa.query.filter(PrecoTetoPremissa.asset_id.in_(asset_ids)).delete(synchronize_session=False)
     Asset.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     OpcaoOp.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
     DarfPagamento.query.filter_by(carteira_id=cid).delete(synchronize_session=False)
@@ -1009,6 +1027,70 @@ def api_darf_desmarcar(did):
     db.session.delete(reg)
     db.session.commit()
     return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- #
+# Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
+# --------------------------------------------------------------------------- #
+
+METODOS_TETO = {"bazin", "barsi"}
+
+
+@app.route("/preco-teto")
+@login_required
+def preco_teto():
+    return render_template("preco_teto.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/preco-teto")
+@login_required
+def api_preco_teto(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    assets = Asset.query.filter_by(carteira_id=cid).order_by(Asset.ordem, Asset.id).all()
+    asset_ids = [a.id for a in assets]
+    premissas = PrecoTetoPremissa.query.filter(PrecoTetoPremissa.asset_id.in_(asset_ids)).all() \
+        if asset_ids else []
+    por_asset = {}
+    for p in premissas:
+        try:
+            dados = json.loads(p.dados_json or "{}")
+        except (TypeError, ValueError):
+            dados = {}
+        por_asset.setdefault(p.asset_id, {})[p.metodo] = dados
+    ativos_out = [{
+        "id": a.id, "ticker": a.ticker, "classe": a.classe or "", "preco": a.preco or 0,
+        "num_acoes": a.num_acoes or 0, "premissas": por_asset.get(a.id, {}),
+    } for a in assets]
+    return jsonify({
+        "ativos": ativos_out,
+        "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
+        "editavel": c.user_id == current_user.id,
+    })
+
+
+@app.route("/api/preco-teto", methods=["POST"])
+@login_required
+def api_preco_teto_salvar():
+    d = request.get_json(force=True) or {}
+    asset_id = d.get("asset_id")
+    metodo = d.get("metodo")
+    a = db.session.get(Asset, int(asset_id) if asset_id else 0)
+    if not a:
+        abort(404)
+    require_owner(a.carteira)
+    if metodo not in METODOS_TETO:
+        return jsonify({"erro": "método inválido"}), 400
+    dados = d.get("dados") or {}
+    if not isinstance(dados, dict):
+        return jsonify({"erro": "dados inválidos"}), 400
+    premissa = PrecoTetoPremissa.query.filter_by(asset_id=a.id, metodo=metodo).first()
+    if not premissa:
+        premissa = PrecoTetoPremissa(asset_id=a.id, metodo=metodo)
+        db.session.add(premissa)
+    premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
+    db.session.commit()
+    return jsonify({"ok": True, "id": premissa.id})
 
 
 def ensure_schema():

@@ -229,9 +229,82 @@ def fetch_fundamentus_vp(ticker: str):
     return None
 
 
+def parse_num_br(s: str):
+    """'1.234,56' -> 1234.56 (número no formato brasileiro: ponto de milhar, vírgula decimal)."""
+    try:
+        return float(s.replace(".", "").replace(",", "."))
+    except (ValueError, AttributeError):
+        return None
+
+
+INVESTIDOR10_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+
+def fetch_investidor10(ticker: str) -> dict:
+    """Extrai cotação e indicadores fundamentalistas do investidor10.com.br.
+    Tenta primeiro como ação, depois como FII — os dois têm páginas com HTML
+    bem diferentes entre si, então cada indicador tem seu próprio jeito de achar:
+    - Preço atual: <span class='livePrice'>R$ X</span> (existe nas duas páginas)
+    - LPA/ROE/Payout/VPA/P-VP/DY (ações): atributos data-indicator="X" data-current-value="Y"
+    - P/VP e DY (FIIs): dentro de blocos <div class="_card vp/dy">...<span>Y</span>
+    - Dividendos dos últimos 12 meses (ações e FIIs): frase fixa do texto de perguntas
+      frequentes da própria página ("Nos últimos 12 meses ... pagou um total de R$ X")
+    """
+    t = ticker.strip().lower()
+    out = {"preco": None, "vpa": None, "pvp": None, "dy": None,
+           "lpa": None, "roe": None, "payout": None, "dividendos_12m": None, "erro": None}
+    for tipo in ("acoes", "fiis"):
+        try:
+            r = requests.get(f"https://investidor10.com.br/{tipo}/{t}/",
+                              headers=INVESTIDOR10_HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+            html = r.text
+            m = re.search(r"class=['\"]livePrice['\"]>\s*R\$\s*([\d\.,]+)", html)
+            if not m:
+                continue  # não é esse tipo de ativo — tenta o outro (acoes <-> fiis)
+            out["preco"] = parse_num_br(m.group(1))
+            for campo, nome in (("lpa", "LPA"), ("roe", "ROE"), ("payout", "Payout"),
+                                ("vpa", "VPA")):
+                mi = re.search(rf'data-indicator="{nome}"\s+data-current-value="([\-\d.]+)"', html)
+                if mi:
+                    out[campo] = float(mi.group(1))
+            mp = re.search(r'data-indicator="P/VP"\s+data-current-value="([\-\d.]+)"', html)
+            if mp:
+                out["pvp"] = float(mp.group(1))
+            md = re.search(r'data-indicator="Dividend Yield"\s+data-current-value="([\-\d.]+)"', html)
+            if md:
+                out["dy"] = float(md.group(1))
+            if out["pvp"] is None:  # layout de FII
+                mpvp = re.search(r'"_card vp".*?<span>([\d.,]+)</span>', html, re.S)
+                if mpvp:
+                    out["pvp"] = parse_num_br(mpvp.group(1))
+            if out["dy"] is None:
+                mdy = re.search(r'"_card dy".*?<span>([\d.,]+)%</span>', html, re.S)
+                if mdy:
+                    out["dy"] = parse_num_br(mdy.group(1))
+            mdiv = re.search(r"Nos últimos 12 meses,.*?pagou um total de R\$\s*([\d.,]+) em dividendos", html)
+            if mdiv:
+                out["dividendos_12m"] = parse_num_br(mdiv.group(1))
+            return out
+        except Exception as e:  # noqa: BLE001
+            out["erro"] = str(e)
+    if not out["preco"]:
+        out["erro"] = out["erro"] or "ativo não encontrado no Investidor10"
+    return out
+
+
 def fetch_quote(ticker: str, moeda: str = "BRL") -> dict:
     symbol = yahoo_symbol(ticker, moeda)
     out = {"preco": None, "vpa": None, "pvp": None, "dy": None, "erro": None}
+    # Investidor10 é a fonte principal pra ativos em R$ (pedido do Rafael) — cobre ações e
+    # FIIs numa tacada só, sem precisar do Yahoo Finance + Fundamentus juntos como antes.
+    # USD continua no Yahoo Finance, já que o Investidor10 é focado no mercado brasileiro.
+    if moeda != "USD":
+        d10 = fetch_investidor10(ticker)
+        if d10["preco"]:
+            out.update(preco=d10["preco"], vpa=d10["vpa"], pvp=d10["pvp"], dy=d10["dy"])
+            return out
     try:
         tk = yf.Ticker(symbol)
         preco = None
@@ -1033,7 +1106,7 @@ def api_darf_desmarcar(did):
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #
 
-METODOS_TETO = {"bazin", "barsi"}
+METODOS_TETO = {"bazin", "barsi", "fluxo_descontado"}
 
 
 @app.route("/preco-teto")
@@ -1091,6 +1164,14 @@ def api_preco_teto_salvar():
     premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
     db.session.commit()
     return jsonify({"ok": True, "id": premissa.id})
+
+
+@app.route("/api/investidor10/<ticker>")
+@login_required
+def api_investidor10(ticker):
+    """Busca dados do Investidor10 pra preencher as premissas de preço teto na hora
+    (botão 'Buscar dados' da aba) — não salva nada sozinho, só devolve pro front."""
+    return jsonify(fetch_investidor10(ticker))
 
 
 def ensure_schema():

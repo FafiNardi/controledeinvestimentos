@@ -267,7 +267,10 @@ function renderTabela(){
     const distB = distancia(tb_, a.preco);
     const distR = distancia(tr_, a.preco);
     return `<tr>
-      <td class="ativo-cell">${a.ticker}</td>
+      <td class="ativo-cell">${a.ticker}
+        ${EDIT ? `<button class="mini ghost" style="margin-left:6px" title="Busca preço, LPA, ROE, Payout e dividendos 12m no Investidor10"
+            onclick="buscarDadosInvestidor10(${a.id},'${a.ticker}')">🔄</button>` : ''}
+        <span id="statusBusca${a.id}" class="muted" style="font-size:10.5px"></span></td>
       <td>${BRL(a.preco)}</td>
       <td class="col-div">${inputPremissa(a.id,'bazin','dividendos_12m',bazinDados.dividendos_12m,dis)}</td>
       <td>${inputPremissa(a.id,'bazin','yield_minimo',bazinDados.yield_minimo!=null?bazinDados.yield_minimo:6,dis)}</td>
@@ -283,6 +286,45 @@ function renderTabela(){
 
 // ---------------------------------------------------------------- ações
 
+async function buscarDadosInvestidor10(assetId, ticker){
+  const st = document.getElementById('statusBusca'+assetId);
+  st.textContent = 'buscando...';
+  try{
+    const r = await fetch('/api/investidor10/'+encodeURIComponent(ticker));
+    const d = await r.json();
+    if(d.erro && !d.preco){ st.textContent = '⚠ não achei'; setTimeout(()=>st.textContent='',4000); return; }
+    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+    if(!a) return;
+    // preenche o Bazin com os dividendos de 12 meses achados — é exatamente o dado que
+    // esse método pede. O Barsi (soma de 60 meses) o Investidor10 não expõe pronto numa
+    // conta só, então esse campo continua manual por enquanto.
+    if(d.dividendos_12m){
+      a.premissas.bazin = a.premissas.bazin || {};
+      a.premissas.bazin.dividendos_12m = d.dividendos_12m;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:assetId, metodo:'bazin', dados:a.premissas.bazin})});
+    }
+    // LPA/ROE/Payout ficam guardados pra quando o método de fluxo de caixa descontado
+    // (ações/FIIs) for implementado — assim não precisa buscar de novo depois
+    if(d.lpa || d.roe || d.payout){
+      const fluxo = {lpa:d.lpa||0, roe:d.roe||0, payout:d.payout||0};
+      a.premissas.fluxo_descontado = fluxo;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
+    }
+    if(d.preco){
+      await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({preco:d.preco})});
+      a.preco = d.preco;
+    }
+    st.textContent = '✓ atualizado';
+    setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
+    renderTudo();
+  } catch(e){
+    st.textContent = '⚠ erro de rede';
+    setTimeout(()=>st.textContent='',4000);
+  }
+}
 async function salvarPremissa(assetId, metodo, campo, valor){
   let s = String(valor).replace(/[^\d,.-]/g,'');
   if(s.includes(',')) s = s.replace(/\./g,'').replace(',', '.');

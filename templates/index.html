@@ -199,7 +199,8 @@
         <td></td>
         <td><input id="newPct" type="number" placeholder="% ideal" style="text-align:left"></td>
         <td colspan="4"></td>
-        <td><button onclick="addAsset()">Adicionar</button></td>
+        <td><button id="btnAddAsset" onclick="addAsset()">Adicionar</button>
+          <span id="statusAdd" class="muted" style="margin-left:6px"></span></td>
       </tr>
     </tfoot>
   </table>
@@ -463,17 +464,34 @@ async function saveConfig(){
 async function addAsset(){
   const ticker = document.getElementById('newTicker').value.trim();
   if(!ticker){ alert('Informe o ticker (ex: ITUB4) ou um nome para renda fixa.'); return; }
-  const st=document.getElementById('status'); st.textContent='buscando cotação...';
-  await fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      ticker, num_acoes:document.getElementById('newQtd').value,
-      preco_medio: document.getElementById('newPM').value,
-      pct_ideal: document.getElementById('newPct').value,
-      classe: document.getElementById('newClasse').value,
-      segmento: document.getElementById('newSeg').value
-    })});
-  ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
-  st.textContent=''; await load();
+  // feedback bem ao lado do botão (o #status lá do cabeçalho é longe demais quando a tabela
+  // tem muitas colunas/linhas — dava a impressão de que o clique não tinha feito nada enquanto
+  // a busca de cotação no Yahoo Finance ainda estava rodando no servidor, às vezes lenta)
+  const btn = document.getElementById('btnAddAsset'), st = document.getElementById('statusAdd');
+  btn.disabled = true;
+  st.textContent = 'buscando cotação...';
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        ticker, num_acoes:document.getElementById('newQtd').value,
+        preco_medio: document.getElementById('newPM').value,
+        pct_ideal: document.getElementById('newPct').value,
+        classe: document.getElementById('newClasse').value,
+        segmento: document.getElementById('newSeg').value
+      })});
+    if(!r.ok){
+      const d = await r.json().catch(()=>({}));
+      alert('Não consegui adicionar: ' + (d.erro || 'erro '+r.status));
+      return;
+    }
+    ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
+    await load();
+  } catch(e){
+    alert('Não consegui falar com o servidor. Confira sua internet e tente de novo.');
+  } finally {
+    btn.disabled = false;
+    st.textContent = '';
+  }
 }
 async function saveMoeda(){
   if(!CID) return;

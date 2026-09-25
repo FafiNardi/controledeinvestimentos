@@ -294,6 +294,61 @@ def fetch_investidor10(ticker: str) -> dict:
     return out
 
 
+def fetch_investidor10_historico(ticker: str) -> dict:
+    """Histórico de 5 anos de ROE, LPA e Dividend Yield pro método 'Crescimento Histórico'
+    de preço teto. Precisa de duas idas ao site: a primeira só pra achar o ID interno do
+    ativo (aparece no link de 'seguir ativo' da própria página, não é o ticker), a segunda
+    pra pegar o histórico de verdade num endpoint interno que a página usa pros gráficos."""
+    t = ticker.strip().lower()
+    out = {"crescimento_lucro": None, "crescimento_roe": None,
+           "dividendos_consistentes": None, "erro": None}
+    for tipo in ("acoes", "fiis"):
+        try:
+            r = requests.get(f"https://investidor10.com.br/{tipo}/{t}/",
+                              headers=INVESTIDOR10_HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+            m = re.search(r"api/seguir-ativo/(\d+)/", r.text)
+            if not m:
+                continue
+            ativo_id = m.group(1)
+            rh = requests.get(
+                f"https://investidor10.com.br/api/historico-indicadores/{ativo_id}/5/?v=2",
+                headers={**INVESTIDOR10_HEADERS, "X-Requested-With": "XMLHttpRequest",
+                         "Referer": f"https://investidor10.com.br/{tipo}/{t}/"}, timeout=15)
+            if rh.status_code != 200:
+                continue
+            data = rh.json()
+
+            def serie(nome):
+                # "Atual" é o ano corrente ainda em andamento — só entram anos fechados.
+                # Vem do mais recente pro mais antigo.
+                itens = data.get(nome) or []
+                return [float(x["value"]) for x in itens
+                        if x.get("year") != "Atual" and x.get("value") is not None]
+
+            def media_crescimento(vals):
+                if len(vals) < 2:
+                    return None
+                taxas = []
+                for i in range(len(vals) - 1):
+                    anterior = vals[i + 1]
+                    if anterior:
+                        taxas.append((vals[i] - anterior) / anterior * 100)
+                return sum(taxas) / len(taxas) if taxas else None
+
+            lpa, roe, dy = serie("LPA"), serie("ROE"), serie("Dividend Yield")
+            out["crescimento_lucro"] = media_crescimento(lpa)
+            out["crescimento_roe"] = media_crescimento(roe)
+            out["dividendos_consistentes"] = bool(dy) and len(dy) >= 5 and all(v > 0 for v in dy)
+            return out
+        except Exception as e:  # noqa: BLE001
+            out["erro"] = str(e)
+    if out["crescimento_lucro"] is None and out["crescimento_roe"] is None:
+        out["erro"] = out["erro"] or "histórico não encontrado no Investidor10"
+    return out
+
+
 def fetch_quote(ticker: str, moeda: str = "BRL") -> dict:
     symbol = yahoo_symbol(ticker, moeda)
     out = {"preco": None, "vpa": None, "pvp": None, "dy": None, "erro": None}
@@ -1106,7 +1161,7 @@ def api_darf_desmarcar(did):
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #
 
-METODOS_TETO = {"bazin", "barsi", "fluxo_descontado"}
+METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5"}
 
 
 @app.route("/preco-teto")
@@ -1172,6 +1227,14 @@ def api_investidor10(ticker):
     """Busca dados do Investidor10 pra preencher as premissas de preço teto na hora
     (botão 'Buscar dados' da aba) — não salva nada sozinho, só devolve pro front."""
     return jsonify(fetch_investidor10(ticker))
+
+
+@app.route("/api/investidor10-historico/<ticker>")
+@login_required
+def api_investidor10_historico(ticker):
+    """Histórico de 5 anos (crescimento de lucro e ROE, consistência de dividendos)
+    pro método 'Crescimento Histórico' da aba Preço Teto."""
+    return jsonify(fetch_investidor10_historico(ticker))
 
 
 def ensure_schema():

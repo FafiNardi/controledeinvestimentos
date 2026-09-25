@@ -85,7 +85,8 @@
   th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
      text-transform:uppercase;letter-spacing:.04em}
-  th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)}
+  th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)} th.grp-fluxo{color:var(--blue)}
+  th.grp-cresc5{color:var(--red)}
   td:first-child,th:first-child{text-align:left}
   tbody tr:last-child td{border-bottom:0}
   tr:hover td{background:var(--panel2)}
@@ -124,11 +125,14 @@
   <div class="stats" id="stats"></div>
 
   <div class="group-label">Preço teto por ativo</div>
-  <p class="muted" style="font-size:12px;max-width:900px;margin:0 0 4px">
+  <p class="muted" style="font-size:12px;max-width:1000px;margin:0 0 4px">
     Preencha as premissas de cada método pros ativos que você tem no Rebalanceamento — o preço
     teto é recalculado na hora. <b style="color:var(--green)">Bazin</b> = dividendos dos últimos
     12 meses ÷ yield mínimo desejado. <b style="color:var(--gold)">Barsi</b> = soma dos dividendos
     dos últimos 60 meses ÷ 5 (média anual) ÷ yield mínimo desejado.
+    <b style="color:var(--blue)">Fluxo Descontado</b> = projeta o lucro (ações) ou dividendo
+    (FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença entre o retorno
+    mínimo exigido (IPCA + juro real de um título longo) e o crescimento na perpetuidade.
   </p>
   <div class="ledger">
     <div class="tbl-scroll">
@@ -139,10 +143,25 @@
             <th rowspan="2">Preço atual</th>
             <th class="grp-bazin col-div" colspan="4">Bazin</th>
             <th class="grp-barsi col-div" colspan="4">Barsi</th>
+            <th class="grp-fluxo col-div" colspan="9">Fluxo Descontado</th>
+            <th class="grp-cresc5 col-div" colspan="7">Crescimento Histórico</th>
           </tr>
           <tr>
             <th class="col-div">Dividendos 12m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
             <th class="col-div">Soma dividendos 60m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
+            <th class="col-div" title="LPA (ações) ou dividendo/cota (FIIs)">Fluxo atual</th>
+            <th title="Só ações — usado com Payout pra achar o crescimento, se você não preencher um crescimento manual">ROE</th>
+            <th title="Só ações — Retenção = 100% − Payout">Payout</th>
+            <th title="Se preenchido, substitui o cálculo via ROE×Retenção — use pra FIIs (ex: 3%)">Cresc. manual</th>
+            <th title="Juro real do Tesouro IPCA+ de prazo longo">Juro título</th>
+            <th title="IPCA projetado pro próximo ano">IPCA</th>
+            <th title="Crescimento assumido pra sempre — padrão 3%">Cresc. perpet.</th>
+            <th>Teto</th><th>Dist.</th>
+            <th class="col-div">Dividendos 12m</th>
+            <th title="Crescimento médio anual do lucro (LPA) nos últimos 5 anos — usado pra projetar o dividendo do ano que vem">Cresc. lucro (5a)</th>
+            <th title="Só informativo: crescimento médio anual do ROE nos últimos 5 anos, não entra na conta do teto">ROE (5a)</th>
+            <th title="Pagou dividendo em todos os últimos 5 anos?">Consistente?</th>
+            <th>Yield mín.</th><th>Teto</th><th>Dist.</th>
           </tr>
         </thead>
         <tbody id="tbodyAtivos"></tbody>
@@ -215,6 +234,42 @@ function tetoBarsi(dados){
   const mediaAnual = div60 / 5;
   return mediaAnual / (yield_/100);
 }
+// fluxo de caixa descontado simplificado (1 ano de projeção): projeta o fluxo (LPA pra ações,
+// dividendo/cota pra FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença
+// entre o retorno mínimo exigido (IPCA + juro real de um título longo) e o crescimento que se
+// assume pra sempre (perpetuidade)
+function tetoFluxoDescontado(dados){
+  const fluxo = dados.fluxo_atual || 0;
+  if(!fluxo) return null;
+  const perpetuidade = dados.crescimento_perpetuidade != null ? dados.crescimento_perpetuidade : 3;
+  let crescimento = dados.crescimento_manual;
+  if(crescimento==null || crescimento===0){
+    if(dados.roe && dados.payout!=null){
+      const retencao = (100 - dados.payout) / 100;
+      crescimento = dados.roe * retencao;
+    } else {
+      crescimento = 0;
+    }
+  }
+  const fluxoAno1 = fluxo * (1 + crescimento/100);
+  const juro = dados.juro_titulo || 0;
+  const ipca = dados.ipca_estimado || 0;
+  const taxaFinal = (juro + ipca) - perpetuidade;
+  if(taxaFinal <= 0) return null;
+  return fluxoAno1 / (taxaFinal/100);
+}
+// projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro (LPA) dos
+// últimos 5 anos, e acha o preço que faria esse dividendo render pelo menos o yield mínimo
+// (padrão 8%). O crescimento do ROE é só informativo aqui, não entra nessa conta.
+function tetoCrescimentoHistorico(dados){
+  const divAtual = dados.dividendos_12m || 0;
+  if(!divAtual) return null;
+  const crescLucro = dados.crescimento_lucro || 0;
+  const yieldMin = dados.yield_minimo != null ? dados.yield_minimo : 8;
+  if(!yieldMin) return null;
+  const divProjetado = divAtual * (1 + crescLucro/100);
+  return divProjetado / (yieldMin/100);
+}
 function distancia(teto, precoAtual){
   if(teto==null || !precoAtual) return null;
   return (teto - precoAtual) / precoAtual * 100;
@@ -231,7 +286,11 @@ function renderStats(){
   ativos.forEach(a=>{
     const tb = tetoBazin(a.premissas.bazin||{});
     const tr = tetoBarsi(a.premissas.barsi||{});
-    const melhorTeto = tb!=null ? tb : tr;
+    const tf = tetoFluxoDescontado(a.premissas.fluxo_descontado||{});
+    const tc = tetoCrescimentoHistorico(a.premissas.cresc5||{});
+    // o mais conservador dos tetos preenchidos — cruzar o menor teto já é sinal seguro
+    const tetos = [tb, tr, tf, tc].filter(v=>v!=null);
+    const melhorTeto = tetos.length ? Math.min(...tetos) : null;
     if(melhorTeto!=null){
       comTetoDefinido++;
       if(a.preco >= melhorTeto) acimaDoTeto++;
@@ -255,17 +314,25 @@ function renderTabela(){
   const ativos = DATA.ativos||[];
   const tb = document.getElementById('tbodyAtivos');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="26">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
     return;
   }
   const dis = EDIT ? '' : 'disabled';
   tb.innerHTML = ativos.map(a=>{
     const bazinDados = a.premissas.bazin || {};
     const barsiDados = a.premissas.barsi || {};
+    const fluxoDados = a.premissas.fluxo_descontado || {};
+    const cresc5Dados = a.premissas.cresc5 || {};
     const tb_ = tetoBazin(bazinDados);
     const tr_ = tetoBarsi(barsiDados);
+    const tf_ = tetoFluxoDescontado(fluxoDados);
+    const tc_ = tetoCrescimentoHistorico(cresc5Dados);
     const distB = distancia(tb_, a.preco);
     const distR = distancia(tr_, a.preco);
+    const distF = distancia(tf_, a.preco);
+    const distC = distancia(tc_, a.preco);
+    const consistente = cresc5Dados.dividendos_consistentes;
+    const consistenteTxt = consistente==null ? '—' : (consistente ? '<span class="pos">✓ sim</span>' : '<span class="neg">✗ não</span>');
     return `<tr>
       <td class="ativo-cell">${a.ticker}
         ${EDIT ? `<button class="mini ghost" style="margin-left:6px" title="Busca preço, LPA, ROE, Payout e dividendos 12m no Investidor10"
@@ -280,6 +347,22 @@ function renderTabela(){
       <td>${inputPremissa(a.id,'barsi','yield_minimo',barsiDados.yield_minimo!=null?barsiDados.yield_minimo:6,dis)}</td>
       <td>${tr_==null?'—':BRL(tr_)}</td>
       <td class="${distR>=0?'pos':(distR<0?'neg':'')}">${PCT(distR)}</td>
+      <td class="col-div">${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',fluxoDados.fluxo_atual,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','roe',fluxoDados.roe,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','payout',fluxoDados.payout,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_manual',fluxoDados.crescimento_manual,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','juro_titulo',fluxoDados.juro_titulo,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','ipca_estimado',fluxoDados.ipca_estimado,dis)}</td>
+      <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_perpetuidade',fluxoDados.crescimento_perpetuidade!=null?fluxoDados.crescimento_perpetuidade:3,dis)}</td>
+      <td>${tf_==null?'—':BRL(tf_)}</td>
+      <td class="${distF>=0?'pos':(distF<0?'neg':'')}">${PCT(distF)}</td>
+      <td class="col-div">${inputPremissa(a.id,'cresc5','dividendos_12m',cresc5Dados.dividendos_12m,dis)}</td>
+      <td>${inputPremissa(a.id,'cresc5','crescimento_lucro',cresc5Dados.crescimento_lucro,dis)}</td>
+      <td class="muted">${cresc5Dados.crescimento_roe!=null ? PCT(cresc5Dados.crescimento_roe) : '—'}</td>
+      <td>${consistenteTxt}</td>
+      <td>${inputPremissa(a.id,'cresc5','yield_minimo',cresc5Dados.yield_minimo!=null?cresc5Dados.yield_minimo:8,dis)}</td>
+      <td>${tc_==null?'—':BRL(tc_)}</td>
+      <td class="${distC>=0?'pos':(distC<0?'neg':'')}">${PCT(distC)}</td>
     </tr>`;
   }).join('');
 }
@@ -304,10 +387,10 @@ async function buscarDadosInvestidor10(assetId, ticker){
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:assetId, metodo:'bazin', dados:a.premissas.bazin})});
     }
-    // LPA/ROE/Payout ficam guardados pra quando o método de fluxo de caixa descontado
-    // (ações/FIIs) for implementado — assim não precisa buscar de novo depois
+    // LPA vira o "fluxo atual" do método de fluxo descontado (é o mesmo número, só que lá
+    // ele é genérico pra também aceitar dividendo/cota manual no caso de FIIs)
     if(d.lpa || d.roe || d.payout){
-      const fluxo = {lpa:d.lpa||0, roe:d.roe||0, payout:d.payout||0};
+      const fluxo = {...(a.premissas.fluxo_descontado||{}), fluxo_atual:d.lpa||0, roe:d.roe||0, payout:d.payout||0};
       a.premissas.fluxo_descontado = fluxo;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
@@ -317,6 +400,21 @@ async function buscarDadosInvestidor10(assetId, ticker){
         body: JSON.stringify({preco:d.preco})});
       a.preco = d.preco;
     }
+    // histórico de 5 anos pro método "Crescimento Histórico" — pedido separado, então uma
+    // segunda chamada (mais lenta, o Investidor10 precisa achar o ID interno do ativo antes)
+    st.textContent = 'buscando histórico...';
+    try{
+      const rh = await fetch('/api/investidor10-historico/'+encodeURIComponent(ticker));
+      const dh = await rh.json();
+      if(dh.crescimento_lucro!=null || dh.crescimento_roe!=null){
+        const cresc5 = {...(a.premissas.cresc5||{}), dividendos_12m:d.dividendos_12m||0,
+          crescimento_lucro:dh.crescimento_lucro||0, crescimento_roe:dh.crescimento_roe,
+          dividendos_consistentes: dh.dividendos_consistentes ? 1 : 0};
+        a.premissas.cresc5 = cresc5;
+        await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({asset_id:assetId, metodo:'cresc5', dados:cresc5})});
+      }
+    } catch(e){ /* histórico é bônus — se falhar, segue com o resto que já buscou */ }
     st.textContent = '✓ atualizado';
     setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
     renderTudo();

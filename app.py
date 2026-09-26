@@ -30,8 +30,15 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "troque-esta-chave-em-pr
 
 # Banco: PostgreSQL na nuvem (DATABASE_URL) ou SQLite local
 db_url = os.environ.get("DATABASE_URL", "")
-if db_url.startswith("postgres://"):           # Render usa esse prefixo antigo
+if db_url.startswith("postgres://"):           # Render/Neon usam esse prefixo antigo
     db_url = db_url.replace("postgres://", "postgresql://", 1)
+# Força o driver psycopg2 (é o que está no requirements.txt) — "postgresql://" sozinho,
+# sem versão travada nas dependências, corre o risco de pegar uma versão nova do
+# SQLAlchemy que tenta usar o driver "psycopg" (v3) por padrão, que a gente não instala.
+# Foi exatamente isso que derrubou o deploy de 26/09/2026 com "ModuleNotFoundError:
+# No module named 'psycopg'" — o app nem chegava a subir.
+if db_url.startswith("postgresql://") and "+" not in db_url.split("://", 1)[0]:
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url or "sqlite:///" + os.path.join(BASE_DIR, "carteira.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # O Render (plano grátis) hiberna o site por inatividade, e o Neon (também grátis)

@@ -65,13 +65,6 @@
   .ctx-label select{max-width:240px}
 
   .wrap{padding:0 24px 40px}
-  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap;align-items:stretch}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
-        padding:10px 14px;min-width:170px;flex:1}
-  .stat .k{font-size:10.5px;color:var(--muted);white-space:nowrap;font-weight:700;
-           text-transform:uppercase;letter-spacing:.04em}
-  .stat .v{font-size:19px;font-weight:700;margin-top:5px;white-space:nowrap}
-  .stat .sub{font-size:11px;color:var(--muted);margin-top:2px}
   .pos{color:var(--green)} .neg{color:var(--red)}
   .muted{color:var(--muted)}
   .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
@@ -128,10 +121,15 @@
   .editor-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
   .editor-ativo{font-weight:800;font-size:15px}
   .editor-fields{display:flex;flex-wrap:wrap;gap:14px 20px}
-  .editor-field{display:flex;flex-direction:column;gap:4px;min-width:120px}
+  .editor-field{display:flex;flex-direction:column;gap:4px;width:160px}
   .editor-field label{font-size:10.5px;color:var(--muted);font-weight:700;
-                       text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+                       text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;
+                       display:flex;align-items:center;gap:5px}
   .editor-field input{width:140px}
+  .editor-field .ajuda{width:14px;height:14px;border-radius:50%;background:var(--line);color:var(--muted);
+                        font-size:9.5px;font-weight:800;text-transform:none;letter-spacing:0;
+                        display:inline-flex;align-items:center;justify-content:center;cursor:help;flex:none}
+  .editor-field .hint{font-size:10.5px;color:var(--muted);line-height:1.35;white-space:normal}
   .editor-resultado{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
                      border-top:1px solid var(--line)}
   .editor-resultado .item .k{font-size:10.5px;color:var(--muted);font-weight:700;
@@ -162,8 +160,6 @@
 </header>
 
 <div class="wrap">
-  <div class="stats" id="stats"></div>
-
   <div class="group-label">Ativos e preço teto</div>
   <p class="muted" style="font-size:12px;max-width:900px;margin:0 0 4px">
     <b class="resumo-teto melhor">Sublinhado</b> = o teto mais conservador entre os métodos já
@@ -317,7 +313,6 @@ let METODO_EDITANDO = 'bazin';
 let SORT_RESUMO = {campo:'ticker', dir:1};
 
 function renderTudo(){
-  renderStats();
   popularFiltroClasse();
   renderResumo();
   renderEditor();
@@ -335,31 +330,6 @@ function ordenarResumo(campo){
   if(SORT_RESUMO.campo===campo) SORT_RESUMO.dir *= -1;
   else SORT_RESUMO = {campo, dir:1};
   renderResumo();
-}
-
-function renderStats(){
-  const ativos = DATA.ativos||[];
-  let acimaDoTeto = 0, comTetoDefinido = 0;
-  ativos.forEach(a=>{
-    const tb = tetoBazin(a.premissas.bazin||{});
-    const tr = tetoBarsi(a.premissas.barsi||{});
-    const tf = tetoFluxoDescontado(a.premissas.fluxo_descontado||{});
-    const tc = tetoCrescimentoHistorico(a.premissas.cresc5||{});
-    // o mais conservador dos tetos preenchidos — cruzar o menor teto já é sinal seguro
-    const tetos = [tb, tr, tf, tc].filter(v=>v!=null);
-    const melhorTeto = tetos.length ? Math.min(...tetos) : null;
-    if(melhorTeto!=null){
-      comTetoDefinido++;
-      if(a.preco >= melhorTeto) acimaDoTeto++;
-    }
-  });
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="k">Ativos com preço teto definido</div><div class="v">${comTetoDefinido}</div>
-      <div class="sub">de ${ativos.length} no Rebalanceamento</div></div>
-    <div class="stat"><div class="k">No ponto de vender call</div>
-      <div class="v" style="color:var(--green)">${acimaDoTeto}</div>
-      <div class="sub">preço atual já bateu ou passou do teto</div></div>
-  `;
 }
 
 function inputPremissa(assetId, metodo, campo, valor, dis){
@@ -514,13 +484,20 @@ function renderEditor(){
       <div class="editor-field"><label>Soma dividendos 60m</label>${inputPremissa(a.id,'barsi','dividendos_60m',d.dividendos_60m,dis)}</div>
       <div class="editor-field"><label>Yield mín.</label>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}</div>`,
     fluxo_descontado: ()=>`
-      <div class="editor-field"><label title="LPA (ações) ou dividendo/cota (FIIs)">Fluxo atual</label>${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',d.fluxo_atual,dis)}</div>
-      <div class="editor-field"><label title="Só ações — usado com Payout pra achar o crescimento, se você não preencher um crescimento manual">ROE</label>${inputPremissa(a.id,'fluxo_descontado','roe',d.roe,dis)}</div>
-      <div class="editor-field"><label title="Retenção = 100% − Payout">Payout</label>${inputPremissa(a.id,'fluxo_descontado','payout',d.payout,dis)}</div>
-      <div class="editor-field"><label title="Se preenchido, substitui o cálculo via ROE×Retenção — use pra FIIs (ex: 3%)">Cresc. manual</label>${inputPremissa(a.id,'fluxo_descontado','crescimento_manual',d.crescimento_manual,dis)}</div>
-      <div class="editor-field"><label title="Juro real do Tesouro IPCA+ de prazo longo">Juro título</label>${inputPremissa(a.id,'fluxo_descontado','juro_titulo',d.juro_titulo,dis)}</div>
-      <div class="editor-field"><label title="IPCA projetado pro próximo ano">IPCA</label>${inputPremissa(a.id,'fluxo_descontado','ipca_estimado',d.ipca_estimado,dis)}</div>
-      <div class="editor-field"><label title="Crescimento assumido pra sempre — padrão 3%">Cresc. perpet.</label>${inputPremissa(a.id,'fluxo_descontado','crescimento_perpetuidade',d.crescimento_perpetuidade!=null?d.crescimento_perpetuidade:3,dis)}</div>`,
+      <div class="editor-field"><label>Fluxo atual<span class="ajuda" title="LPA (ações) ou dividendo/cota (FIIs)">?</span></label>${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',d.fluxo_atual,dis)}
+        <span class="hint">LPA (ações) ou dividendo/cota (FIIs)</span></div>
+      <div class="editor-field"><label>ROE<span class="ajuda" title="Lucro ÷ Patrimônio Líquido">?</span></label>${inputPremissa(a.id,'fluxo_descontado','roe',d.roe,dis)}
+        <span class="hint">Retorno sobre patrimônio (só ações). Com o Payout, estima o crescimento</span></div>
+      <div class="editor-field"><label>Payout<span class="ajuda" title="% do lucro distribuído como dividendo">?</span></label>${inputPremissa(a.id,'fluxo_descontado','payout',d.payout,dis)}
+        <span class="hint">% do lucro pago como dividendo. O resto (retenção) financia o crescimento</span></div>
+      <div class="editor-field"><label>Cresc. manual<span class="ajuda" title="Substitui o cálculo automático via ROE×Retenção">?</span></label>${inputPremissa(a.id,'fluxo_descontado','crescimento_manual',d.crescimento_manual,dis)}
+        <span class="hint">Crescimento definido à mão — usa no lugar de ROE×Retenção (bom pra FIIs, ex: 3%)</span></div>
+      <div class="editor-field"><label>Juro título<span class="ajuda" title="Juro real de um título público longo">?</span></label>${inputPremissa(a.id,'fluxo_descontado','juro_titulo',d.juro_titulo,dis)}
+        <span class="hint">Juro real do Tesouro IPCA+ longo — a taxa "livre de risco"</span></div>
+      <div class="editor-field"><label>IPCA<span class="ajuda" title="Inflação projetada pro próximo ano">?</span></label>${inputPremissa(a.id,'fluxo_descontado','ipca_estimado',d.ipca_estimado,dis)}
+        <span class="hint">Inflação esperada pro próximo ano</span></div>
+      <div class="editor-field"><label>Cresc. perpet.<span class="ajuda" title="Crescimento assumido para sempre, depois do 1º ano">?</span></label>${inputPremissa(a.id,'fluxo_descontado','crescimento_perpetuidade',d.crescimento_perpetuidade!=null?d.crescimento_perpetuidade:3,dis)}
+        <span class="hint">Crescimento assumido pra sempre depois do 1º ano — padrão 3%</span></div>`,
     cresc5: ()=>{
       const consistente = d.dividendos_consistentes;
       const consistenteTxt = consistente==null ? '—' : (consistente ? '<span class="pos">✓ sim</span>' : '<span class="neg">✗ não</span>');
@@ -604,7 +581,7 @@ async function buscarDadosInvestidor10(assetId, ticker){
     } catch(e){ /* histórico é bônus — se falhar, segue com o resto que já buscou */ }
     st.textContent = '✓ atualizado';
     setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
-    renderStats(); renderResumo(); renderEditor();
+    renderResumo(); renderEditor();
   } catch(e){
     st.textContent = '⚠ erro de rede';
     setTimeout(()=>st.textContent='',4000);
@@ -621,7 +598,7 @@ async function salvarPremissa(assetId, metodo, campo, valor){
   await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({asset_id:assetId, metodo, dados:a.premissas[metodo]})});
   // atualiza a lista e o próprio editor na hora, sem recarregar a página nem perder a posição
-  renderStats(); renderResumo(); renderEditor();
+  renderResumo(); renderEditor();
 }
 
 carregarCarteiras();

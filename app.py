@@ -109,6 +109,10 @@ class Asset(db.Model):
     vpa_manual = db.Column(db.Integer, default=0)
     ordem = db.Column(db.Integer, default=0)
     updated_at = db.Column(db.String(40), default="")
+    # esconde o ativo só da lista da aba Preço Teto (ele continua existindo normalmente no
+    # Rebalanceamento) — pra ativos como títulos públicos e fundos de investimento, que não
+    # fazem sentido nessa conta
+    oculto_preco_teto = db.Column(db.Integer, default=0)
     premissas_teto = db.relationship("PrecoTetoPremissa", cascade="all, delete-orphan")
 
 
@@ -660,7 +664,7 @@ def api_add_asset(cid):
 
 
 EDITABLE = {"ticker", "classe", "segmento", "num_acoes", "preco_medio",
-            "pct_ideal", "preco", "manual", "vpa", "vpa_manual"}
+            "pct_ideal", "preco", "manual", "vpa", "vpa_manual", "oculto_preco_teto"}
 NUM_FIELDS = {"num_acoes", "preco_medio", "pct_ideal", "preco", "vpa"}
 
 
@@ -1196,12 +1200,25 @@ def api_preco_teto(cid):
     ativos_out = [{
         "id": a.id, "ticker": a.ticker, "classe": a.classe or "", "preco": a.preco or 0,
         "num_acoes": a.num_acoes or 0, "premissas": por_asset.get(a.id, {}),
+        "oculto": bool(a.oculto_preco_teto),
     } for a in assets]
     return jsonify({
         "ativos": ativos_out,
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
         "editavel": c.user_id == current_user.id,
     })
+
+
+@app.route("/api/carteira/<int:cid>/preco-teto/limpar", methods=["POST"])
+@login_required
+def api_preco_teto_limpar(cid):
+    """'Limpar tabela': oculta TODOS os ativos da lista de preço teto numa vez (não apaga
+    nada — os ativos continuam existindo no Rebalanceamento e dá pra reexibir um por um)."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    Asset.query.filter_by(carteira_id=cid).update({"oculto_preco_teto": 1})
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/preco-teto", methods=["POST"])
@@ -1264,6 +1281,7 @@ def ensure_schema():
     add("rent_ativo", "classe", "classe VARCHAR(30) DEFAULT ''")
     add("rent_ativo", "inicio_ano", "inicio_ano INTEGER")
     add("rent_ativo", "inicio_mes", "inicio_mes INTEGER")
+    add("asset", "oculto_preco_teto", "oculto_preco_teto INTEGER DEFAULT 0")
     add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
     add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
     if insp.has_table("rent_ativo"):

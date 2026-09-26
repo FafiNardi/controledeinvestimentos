@@ -110,6 +110,10 @@
   .resumo-teto{font-weight:700}
   .resumo-teto.melhor{text-decoration:underline;text-underline-offset:3px}
   tr.linha-editando td{background:rgba(91,141,239,.1)}
+  .acoes-cell{display:flex;gap:4px;justify-content:flex-end}
+  .painel-ocultos{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+                   padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+  .painel-ocultos .linha{display:flex;align-items:center;gap:10px;font-size:12.5px}
   html[data-theme="light"] tr.linha-editando td{background:rgba(59,102,209,.08)}
   .filtros{display:flex;gap:10px;align-items:center;padding:6px 0 10px;flex-wrap:wrap}
   th.sortable{cursor:pointer;user-select:none}
@@ -171,7 +175,12 @@
       <select id="filtroClasse" onchange="renderResumo()"><option value="">Todas</option></select>
     </label>
     <span class="muted" style="font-size:11.5px">Clique em "Ativo" ou "Classe" no cabeçalho da lista pra ordenar</span>
+    <div class="topbar-spacer"></div>
+    <span class="muted" id="linkOcultos" style="font-size:11.5px;cursor:pointer;text-decoration:underline;display:none"
+      onclick="toggleOcultos()"></span>
+    <button class="ghost" id="btnLimparTabela" onclick="limparTabela()" title="Esconde todos os ativos da lista (não apaga nada do Rebalanceamento — dá pra reexibir um por um depois)">🧹 Limpar tabela</button>
   </div>
+  <div id="painelOcultos" style="display:none;margin-bottom:10px"></div>
   <div class="ledger">
     <div class="tbl-scroll limitado">
       <table>
@@ -375,7 +384,18 @@ function tetosDoAtivo(a){
 // Lista única: filtro de classe + ordenação por clique no cabeçalho + botão "editar" que
 // abre o ativo no editor logo abaixo, sem precisar de uma segunda tabela gigante.
 function renderResumo(){
-  let ativos = DATA.ativos||[];
+  let ativos = (DATA.ativos||[]).filter(a=>!a.oculto);
+  const ocultos = (DATA.ativos||[]).filter(a=>a.oculto);
+  const linkOcultos = document.getElementById('linkOcultos');
+  if(ocultos.length){
+    linkOcultos.style.display = '';
+    linkOcultos.textContent = `👁 ${ocultos.length} ativo${ocultos.length>1?'s':''} oculto${ocultos.length>1?'s':''}`;
+  } else {
+    linkOcultos.style.display = 'none';
+    document.getElementById('painelOcultos').style.display = 'none';
+  }
+  if(document.getElementById('painelOcultos').style.display !== 'none') renderOcultos(ocultos);
+
   const classeFiltro = document.getElementById('filtroClasse').value;
   if(classeFiltro) ativos = ativos.filter(a=>a.classe===classeFiltro);
   ativos = ativos.slice().sort((a,b)=>{
@@ -406,7 +426,10 @@ function renderResumo(){
       <td class="grp-cresc5">${t.cresc5==null?'—':BRL(t.cresc5)}</td>
       <td class="resumo-teto melhor">${melhor==null?'—':BRL(melhor)}</td>
       <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
-      <td><button class="mini ghost" onclick="selecionarAtivo(${a.id})">✎ Editar</button></td>
+      <td class="acoes-cell">
+        <button class="mini ghost" onclick="selecionarAtivo(${a.id})">✎ Editar</button>
+        <button class="mini ghost" title="Remover esse ativo dessa lista (continua no Rebalanceamento)" onclick="removerAtivoTeto(${a.id},'${a.ticker}')">🗑</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -417,6 +440,49 @@ function selecionarAtivo(assetId){
   ATIVO_EDITANDO = assetId;
   renderResumo();
   renderEditor();
+  document.getElementById('editorPremissas').scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function removerAtivoTeto(assetId, ticker){
+  if(!confirm(`Remover ${ticker} da lista de Preço Teto?\n\nEle continua normalmente no Rebalanceamento — dá pra trazer de volta clicando em "ativos ocultos".`)) return;
+  await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({oculto_preco_teto:1})});
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(a) a.oculto = true;
+  if(ATIVO_EDITANDO===assetId) ATIVO_EDITANDO = null;
+  renderResumo();
+  renderEditor();
+}
+async function limparTabela(){
+  if(!confirm('Esconder TODOS os ativos da lista de Preço Teto?\n\nNenhum ativo é apagado — eles continuam no Rebalanceamento normalmente, e dá pra trazer cada um de volta depois em "ativos ocultos".')) return;
+  await fetch('/api/carteira/'+CID+'/preco-teto/limpar', {method:'POST'});
+  (DATA.ativos||[]).forEach(a=>a.oculto=true);
+  ATIVO_EDITANDO = null;
+  renderResumo();
+  renderEditor();
+}
+function toggleOcultos(){
+  const painel = document.getElementById('painelOcultos');
+  const abrindo = painel.style.display === 'none';
+  painel.style.display = abrindo ? '' : 'none';
+  if(abrindo) renderOcultos((DATA.ativos||[]).filter(a=>a.oculto));
+}
+function renderOcultos(ocultos){
+  const painel = document.getElementById('painelOcultos');
+  if(!ocultos.length){ painel.innerHTML = ''; painel.style.display = 'none'; return; }
+  painel.innerHTML = `<div class="painel-ocultos">` + ocultos.map(a=>`
+    <div class="linha">
+      <span style="min-width:80px;font-weight:700">${a.ticker}</span>
+      <span class="muted">${a.classe||'—'}</span>
+      <div class="topbar-spacer"></div>
+      <button class="mini ghost" onclick="mostrarAtivoOculto(${a.id})">👁 Mostrar de novo</button>
+    </div>`).join('') + `</div>`;
+}
+async function mostrarAtivoOculto(assetId){
+  await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({oculto_preco_teto:0})});
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(a) a.oculto = false;
+  renderResumo();
 }
 function mudarMetodoEditor(m){
   METODO_EDITANDO = m;

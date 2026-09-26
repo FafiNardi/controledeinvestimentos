@@ -97,6 +97,18 @@
   td.ativo-cell{text-align:left;font-weight:700}
   .empty-row td{text-align:center;color:var(--muted);padding:20px}
   .col-div{border-left:1px solid var(--line)}
+  .view-tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--panel2);padding:3px;border-radius:9px;
+             border:1px solid var(--line);width:fit-content;margin-top:10px}
+  .view-tab{background:none;border:0;color:var(--muted);padding:8px 14px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .view-tab:hover:not(.on){background:var(--panel);color:var(--txt)}
+  .view-tab.on{color:var(--tab-txt-on)}
+  .view-tab[data-metodo="bazin"].on{background:var(--green)}
+  .view-tab[data-metodo="barsi"].on{background:var(--gold)}
+  .view-tab[data-metodo="fluxo_descontado"].on{background:var(--blue)}
+  .view-tab[data-metodo="cresc5"].on{background:var(--red)}
+  .resumo-teto{font-weight:700}
+  .resumo-teto.melhor{text-decoration:underline;text-underline-offset:3px}
 </style>
 </head>
 <body>
@@ -124,47 +136,39 @@
 <div class="wrap">
   <div class="stats" id="stats"></div>
 
-  <div class="group-label">Preço teto por ativo</div>
-  <p class="muted" style="font-size:12px;max-width:1000px;margin:0 0 4px">
-    Preencha as premissas de cada método pros ativos que você tem no Rebalanceamento — o preço
-    teto é recalculado na hora. <b style="color:var(--green)">Bazin</b> = dividendos dos últimos
-    12 meses ÷ yield mínimo desejado. <b style="color:var(--gold)">Barsi</b> = soma dos dividendos
-    dos últimos 60 meses ÷ 5 (média anual) ÷ yield mínimo desejado.
-    <b style="color:var(--blue)">Fluxo Descontado</b> = projeta o lucro (ações) ou dividendo
-    (FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença entre o retorno
-    mínimo exigido (IPCA + juro real de um título longo) e o crescimento na perpetuidade.
+  <div class="group-label">Resumo por ativo</div>
+  <p class="muted" style="font-size:12px;max-width:900px;margin:0 0 4px">
+    O teto de cada método aparece aqui assim que você preenche as premissas dele (abas
+    logo abaixo). <b class="resumo-teto melhor">Sublinhado</b> = o teto mais conservador
+    entre os que já estão preenchidos pra esse ativo.
   </p>
   <div class="ledger">
     <div class="tbl-scroll">
       <table>
-        <thead>
-          <tr>
-            <th rowspan="2">Ativo</th>
-            <th rowspan="2">Preço atual</th>
-            <th class="grp-bazin col-div" colspan="4">Bazin</th>
-            <th class="grp-barsi col-div" colspan="4">Barsi</th>
-            <th class="grp-fluxo col-div" colspan="9">Fluxo Descontado</th>
-            <th class="grp-cresc5 col-div" colspan="7">Crescimento Histórico</th>
-          </tr>
-          <tr>
-            <th class="col-div">Dividendos 12m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
-            <th class="col-div">Soma dividendos 60m</th><th>Yield mín.</th><th>Teto</th><th>Dist.</th>
-            <th class="col-div" title="LPA (ações) ou dividendo/cota (FIIs)">Fluxo atual</th>
-            <th title="Só ações — usado com Payout pra achar o crescimento, se você não preencher um crescimento manual">ROE</th>
-            <th title="Só ações — Retenção = 100% − Payout">Payout</th>
-            <th title="Se preenchido, substitui o cálculo via ROE×Retenção — use pra FIIs (ex: 3%)">Cresc. manual</th>
-            <th title="Juro real do Tesouro IPCA+ de prazo longo">Juro título</th>
-            <th title="IPCA projetado pro próximo ano">IPCA</th>
-            <th title="Crescimento assumido pra sempre — padrão 3%">Cresc. perpet.</th>
-            <th>Teto</th><th>Dist.</th>
-            <th class="col-div">Dividendos 12m</th>
-            <th title="Crescimento médio anual do lucro (LPA) nos últimos 5 anos — usado pra projetar o dividendo do ano que vem">Cresc. lucro (5a)</th>
-            <th title="Só informativo: crescimento médio anual do ROE nos últimos 5 anos, não entra na conta do teto">ROE (5a)</th>
-            <th title="Pagou dividendo em todos os últimos 5 anos?">Consistente?</th>
-            <th>Yield mín.</th><th>Teto</th><th>Dist.</th>
-          </tr>
-        </thead>
-        <tbody id="tbodyAtivos"></tbody>
+        <thead><tr>
+          <th>Ativo</th><th>Preço atual</th>
+          <th class="grp-bazin">Teto Bazin</th><th class="grp-barsi">Teto Barsi</th>
+          <th class="grp-fluxo">Teto Fluxo Desc.</th><th class="grp-cresc5">Teto Cresc. Hist.</th>
+          <th>Melhor teto</th><th>Distância</th>
+        </tr></thead>
+        <tbody id="tbodyResumo"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label">Editar premissas</div>
+  <div class="view-tabs" id="metodoTabs">
+    <button class="view-tab on" data-metodo="bazin" onclick="mudarMetodo('bazin')">Bazin</button>
+    <button class="view-tab" data-metodo="barsi" onclick="mudarMetodo('barsi')">Barsi</button>
+    <button class="view-tab" data-metodo="fluxo_descontado" onclick="mudarMetodo('fluxo_descontado')">Fluxo Descontado</button>
+    <button class="view-tab" data-metodo="cresc5" onclick="mudarMetodo('cresc5')">Crescimento Histórico</button>
+  </div>
+  <p class="muted" id="descMetodo" style="font-size:12px;max-width:900px;margin:10px 0 4px"></p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr id="theadMetodo"></tr></thead>
+        <tbody id="tbodyMetodo"></tbody>
       </table>
     </div>
   </div>
@@ -275,9 +279,24 @@ function distancia(teto, precoAtual){
   return (teto - precoAtual) / precoAtual * 100;
 }
 
+let METODO_ATUAL = 'bazin';
+const METODOS_INFO = {
+  bazin: {cor:'green', desc:'Bazin = dividendos dos últimos 12 meses ÷ yield mínimo desejado.'},
+  barsi: {cor:'gold', desc:'Barsi = soma dos dividendos dos últimos 60 meses ÷ 5 (média anual) ÷ yield mínimo desejado.'},
+  fluxo_descontado: {cor:'blue', desc:'Fluxo Descontado = projeta o lucro (ações) ou dividendo (FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença entre o retorno mínimo exigido (IPCA + juro real de um título longo) e o crescimento na perpetuidade.'},
+  cresc5: {cor:'red', desc:'Crescimento Histórico = projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro dos últimos 5 anos, e acha o preço que faria esse dividendo render o yield mínimo. O crescimento do ROE e a consistência de dividendos aparecem só como informação de qualidade.'},
+};
+
 function renderTudo(){
   renderStats();
-  renderTabela();
+  renderResumo();
+  renderMetodo();
+}
+
+function mudarMetodo(m){
+  METODO_ATUAL = m;
+  document.querySelectorAll('#metodoTabs .view-tab').forEach(b=>b.classList.toggle('on', b.dataset.metodo===m));
+  renderMetodo();
 }
 
 function renderStats(){
@@ -309,60 +328,120 @@ function inputPremissa(assetId, metodo, campo, valor, dis){
   return `<input type="text" inputmode="decimal" value="${valor!=null && valor!==0 ? valor : ''}"
     ${dis} onfocus="this.select()" onchange="salvarPremissa(${assetId},'${metodo}','${campo}',this.value)">`;
 }
+function botaoBuscar(a){
+  return EDIT ? `<button class="mini ghost" style="margin-left:6px" title="Busca preço, LPA, ROE, Payout, dividendos 12m e histórico de 5 anos no Investidor10"
+      onclick="buscarDadosInvestidor10(${a.id},'${a.ticker}')">🔄</button>
+    <span id="statusBusca${a.id}" class="muted" style="font-size:10.5px"></span>` : '';
+}
 
-function renderTabela(){
+// Tabela de resumo: só os tetos já calculados, um ativo por linha, pra dar uma visão geral
+// sem precisar abrir cada método — o "melhor teto" é o mais conservador dos preenchidos.
+function renderResumo(){
   const ativos = DATA.ativos||[];
-  const tb = document.getElementById('tbodyAtivos');
+  const tb = document.getElementById('tbodyResumo');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="26">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
     return;
   }
-  const dis = EDIT ? '' : 'disabled';
   tb.innerHTML = ativos.map(a=>{
-    const bazinDados = a.premissas.bazin || {};
-    const barsiDados = a.premissas.barsi || {};
-    const fluxoDados = a.premissas.fluxo_descontado || {};
-    const cresc5Dados = a.premissas.cresc5 || {};
-    const tb_ = tetoBazin(bazinDados);
-    const tr_ = tetoBarsi(barsiDados);
-    const tf_ = tetoFluxoDescontado(fluxoDados);
-    const tc_ = tetoCrescimentoHistorico(cresc5Dados);
-    const distB = distancia(tb_, a.preco);
-    const distR = distancia(tr_, a.preco);
-    const distF = distancia(tf_, a.preco);
-    const distC = distancia(tc_, a.preco);
-    const consistente = cresc5Dados.dividendos_consistentes;
+    const tb_ = tetoBazin(a.premissas.bazin||{});
+    const tr_ = tetoBarsi(a.premissas.barsi||{});
+    const tf_ = tetoFluxoDescontado(a.premissas.fluxo_descontado||{});
+    const tc_ = tetoCrescimentoHistorico(a.premissas.cresc5||{});
+    const tetos = [tb_, tr_, tf_, tc_].filter(v=>v!=null);
+    const melhor = tetos.length ? Math.min(...tetos) : null;
+    const dist = distancia(melhor, a.preco);
+    return `<tr>
+      <td class="ativo-cell">${a.ticker}${botaoBuscar(a)}</td>
+      <td>${BRL(a.preco)}</td>
+      <td class="grp-bazin">${tb_==null?'—':BRL(tb_)}</td>
+      <td class="grp-barsi">${tr_==null?'—':BRL(tr_)}</td>
+      <td class="grp-fluxo">${tf_==null?'—':BRL(tf_)}</td>
+      <td class="grp-cresc5">${tc_==null?'—':BRL(tc_)}</td>
+      <td class="resumo-teto melhor">${melhor==null?'—':BRL(melhor)}</td>
+      <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Uma aba por método — só o que aquele método precisa, em vez de uma tabela gigante com
+// tudo junto (era exatamente isso que estava difícil de usar)
+function renderMetodo(){
+  const ativos = DATA.ativos||[];
+  const info = METODOS_INFO[METODO_ATUAL];
+  document.getElementById('descMetodo').innerHTML = `<b style="color:var(--${info.cor})">${
+    ({bazin:'Bazin',barsi:'Barsi',fluxo_descontado:'Fluxo Descontado',cresc5:'Crescimento Histórico'})[METODO_ATUAL]
+  }</b> — ${info.desc}`;
+  const thead = document.getElementById('theadMetodo');
+  const tbody = document.getElementById('tbodyMetodo');
+  const dis = EDIT ? '' : 'disabled';
+
+  const colunas = {
+    bazin: ['Ativo','Preço atual','Dividendos 12m','Yield mín.','Teto','Dist.'],
+    barsi: ['Ativo','Preço atual','Soma dividendos 60m','Yield mín.','Teto','Dist.'],
+    fluxo_descontado: ['Ativo','Preço atual','Fluxo atual','ROE','Payout','Cresc. manual','Juro título','IPCA','Cresc. perpet.','Teto','Dist.'],
+    cresc5: ['Ativo','Preço atual','Dividendos 12m','Cresc. lucro (5a)','ROE (5a)','Consistente?','Yield mín.','Teto','Dist.'],
+  };
+  thead.innerHTML = colunas[METODO_ATUAL].map(c=>`<th>${c}</th>`).join('');
+
+  if(!ativos.length){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${colunas[METODO_ATUAL].length}">Nenhum ativo no Rebalanceamento dessa carteira ainda.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = ativos.map(a=>{
+    if(METODO_ATUAL==='bazin'){
+      const d = a.premissas.bazin || {};
+      const teto = tetoBazin(d), dist = distancia(teto, a.preco);
+      return `<tr>
+        <td class="ativo-cell">${a.ticker}${botaoBuscar(a)}</td><td>${BRL(a.preco)}</td>
+        <td>${inputPremissa(a.id,'bazin','dividendos_12m',d.dividendos_12m,dis)}</td>
+        <td>${inputPremissa(a.id,'bazin','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}</td>
+        <td>${teto==null?'—':BRL(teto)}</td>
+        <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
+      </tr>`;
+    }
+    if(METODO_ATUAL==='barsi'){
+      const d = a.premissas.barsi || {};
+      const teto = tetoBarsi(d), dist = distancia(teto, a.preco);
+      return `<tr>
+        <td class="ativo-cell">${a.ticker}${botaoBuscar(a)}</td><td>${BRL(a.preco)}</td>
+        <td>${inputPremissa(a.id,'barsi','dividendos_60m',d.dividendos_60m,dis)}</td>
+        <td>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}</td>
+        <td>${teto==null?'—':BRL(teto)}</td>
+        <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
+      </tr>`;
+    }
+    if(METODO_ATUAL==='fluxo_descontado'){
+      const d = a.premissas.fluxo_descontado || {};
+      const teto = tetoFluxoDescontado(d), dist = distancia(teto, a.preco);
+      return `<tr>
+        <td class="ativo-cell">${a.ticker}${botaoBuscar(a)}</td><td>${BRL(a.preco)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',d.fluxo_atual,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','roe',d.roe,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','payout',d.payout,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_manual',d.crescimento_manual,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','juro_titulo',d.juro_titulo,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','ipca_estimado',d.ipca_estimado,dis)}</td>
+        <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_perpetuidade',d.crescimento_perpetuidade!=null?d.crescimento_perpetuidade:3,dis)}</td>
+        <td>${teto==null?'—':BRL(teto)}</td>
+        <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
+      </tr>`;
+    }
+    // cresc5
+    const d = a.premissas.cresc5 || {};
+    const teto = tetoCrescimentoHistorico(d), dist = distancia(teto, a.preco);
+    const consistente = d.dividendos_consistentes;
     const consistenteTxt = consistente==null ? '—' : (consistente ? '<span class="pos">✓ sim</span>' : '<span class="neg">✗ não</span>');
     return `<tr>
-      <td class="ativo-cell">${a.ticker}
-        ${EDIT ? `<button class="mini ghost" style="margin-left:6px" title="Busca preço, LPA, ROE, Payout e dividendos 12m no Investidor10"
-            onclick="buscarDadosInvestidor10(${a.id},'${a.ticker}')">🔄</button>` : ''}
-        <span id="statusBusca${a.id}" class="muted" style="font-size:10.5px"></span></td>
-      <td>${BRL(a.preco)}</td>
-      <td class="col-div">${inputPremissa(a.id,'bazin','dividendos_12m',bazinDados.dividendos_12m,dis)}</td>
-      <td>${inputPremissa(a.id,'bazin','yield_minimo',bazinDados.yield_minimo!=null?bazinDados.yield_minimo:6,dis)}</td>
-      <td>${tb_==null?'—':BRL(tb_)}</td>
-      <td class="${distB>=0?'pos':(distB<0?'neg':'')}">${PCT(distB)}</td>
-      <td class="col-div">${inputPremissa(a.id,'barsi','dividendos_60m',barsiDados.dividendos_60m,dis)}</td>
-      <td>${inputPremissa(a.id,'barsi','yield_minimo',barsiDados.yield_minimo!=null?barsiDados.yield_minimo:6,dis)}</td>
-      <td>${tr_==null?'—':BRL(tr_)}</td>
-      <td class="${distR>=0?'pos':(distR<0?'neg':'')}">${PCT(distR)}</td>
-      <td class="col-div">${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',fluxoDados.fluxo_atual,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','roe',fluxoDados.roe,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','payout',fluxoDados.payout,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_manual',fluxoDados.crescimento_manual,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','juro_titulo',fluxoDados.juro_titulo,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','ipca_estimado',fluxoDados.ipca_estimado,dis)}</td>
-      <td>${inputPremissa(a.id,'fluxo_descontado','crescimento_perpetuidade',fluxoDados.crescimento_perpetuidade!=null?fluxoDados.crescimento_perpetuidade:3,dis)}</td>
-      <td>${tf_==null?'—':BRL(tf_)}</td>
-      <td class="${distF>=0?'pos':(distF<0?'neg':'')}">${PCT(distF)}</td>
-      <td class="col-div">${inputPremissa(a.id,'cresc5','dividendos_12m',cresc5Dados.dividendos_12m,dis)}</td>
-      <td>${inputPremissa(a.id,'cresc5','crescimento_lucro',cresc5Dados.crescimento_lucro,dis)}</td>
-      <td class="muted">${cresc5Dados.crescimento_roe!=null ? PCT(cresc5Dados.crescimento_roe) : '—'}</td>
+      <td class="ativo-cell">${a.ticker}${botaoBuscar(a)}</td><td>${BRL(a.preco)}</td>
+      <td>${inputPremissa(a.id,'cresc5','dividendos_12m',d.dividendos_12m,dis)}</td>
+      <td>${inputPremissa(a.id,'cresc5','crescimento_lucro',d.crescimento_lucro,dis)}</td>
+      <td class="muted">${d.crescimento_roe!=null ? PCT(d.crescimento_roe) : '—'}</td>
       <td>${consistenteTxt}</td>
-      <td>${inputPremissa(a.id,'cresc5','yield_minimo',cresc5Dados.yield_minimo!=null?cresc5Dados.yield_minimo:8,dis)}</td>
-      <td>${tc_==null?'—':BRL(tc_)}</td>
-      <td class="${distC>=0?'pos':(distC<0?'neg':'')}">${PCT(distC)}</td>
+      <td>${inputPremissa(a.id,'cresc5','yield_minimo',d.yield_minimo!=null?d.yield_minimo:8,dis)}</td>
+      <td>${teto==null?'—':BRL(teto)}</td>
+      <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
     </tr>`;
   }).join('');
 }

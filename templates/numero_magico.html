@@ -118,8 +118,13 @@
     Quantas cotas você precisa ter de um FII pra que o dividendo pago por elas sozinho já dê
     pra comprar mais uma cota, sem precisar colocar dinheiro novo. Só aparecem aqui os ativos
     classificados como <b>FII</b> ou <b>FII Infra</b> na aba Rebalanceamento. Clique em 🔄 pra
-    buscar o dividendo de cada um no Investidor10.
+    buscar o dividendo de cada um no Investidor10, ou use o botão abaixo pra buscar todos de
+    uma vez.
   </p>
+  <div style="display:flex;align-items:center;gap:10px;padding:6px 0 10px;flex-wrap:wrap">
+    <button class="ghost" id="btnAtualizarTodos" onclick="atualizarTodos()">🔄 Atualizar todos</button>
+    <span id="statusTodos" class="muted" style="font-size:11.5px"></span>
+  </div>
   <div class="ledger">
     <div class="tbl-scroll">
       <table>
@@ -220,28 +225,56 @@ function render(){
   }).join('');
 }
 
+// faz a busca de verdade (sem mexer em nenhum status na tela) — usado tanto pelo botão
+// individual quanto pelo "atualizar todos", cada um cuida do próprio texto de status
+async function _buscarDividendoAtivo(assetId, ticker){
+  const r = await fetch('/api/investidor10/'+encodeURIComponent(ticker));
+  const d = await r.json();
+  if(d.erro && !d.dividendos_12m) return false;
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(!a) return false;
+  if(d.dividendos_12m) a.dividendos_12m = d.dividendos_12m;
+  if(d.preco){
+    await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({preco:d.preco})});
+    a.preco = d.preco;
+  }
+  return true;
+}
+
 async function buscarDividendo(assetId, ticker){
   const st = document.getElementById('statusBusca'+assetId);
   st.textContent = 'buscando...';
   try{
-    const r = await fetch('/api/investidor10/'+encodeURIComponent(ticker));
-    const d = await r.json();
-    if(d.erro && !d.dividendos_12m){ st.textContent = '⚠ não achei'; setTimeout(()=>st.textContent='',4000); return; }
-    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
-    if(!a) return;
-    if(d.dividendos_12m) a.dividendos_12m = d.dividendos_12m;
-    if(d.preco){
-      await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({preco:d.preco})});
-      a.preco = d.preco;
-    }
-    st.textContent = '✓ atualizado';
-    setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
+    const ok = await _buscarDividendoAtivo(assetId, ticker);
+    st.textContent = ok ? '✓ atualizado' : '⚠ não achei';
+    setTimeout(()=>{ if(st.textContent.startsWith('✓')||st.textContent.startsWith('⚠')) st.textContent=''; }, 4000);
     render();
   } catch(e){
     st.textContent = '⚠ erro de rede';
     setTimeout(()=>st.textContent='',4000);
   }
+}
+
+async function atualizarTodos(){
+  const ativos = DATA.ativos || [];
+  if(!ativos.length) return;
+  const btn = document.getElementById('btnAtualizarTodos');
+  const st = document.getElementById('statusTodos');
+  btn.disabled = true;
+  let ok = 0, falhou = 0;
+  for(let i=0; i<ativos.length; i++){
+    const a = ativos[i];
+    st.textContent = `Buscando ${i+1} de ${ativos.length}... (${a.ticker})`;
+    try{
+      const sucesso = await _buscarDividendoAtivo(a.id, a.ticker);
+      if(sucesso) ok++; else falhou++;
+      render();
+    } catch(e){ falhou++; }
+  }
+  st.textContent = `✓ ${ok} atualizado${ok!==1?'s':''}` + (falhou ? `, ${falhou} não achado${falhou!==1?'s':''}` : '');
+  btn.disabled = false;
+  setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 8000);
 }
 
 carregarCarteiras();

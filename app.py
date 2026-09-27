@@ -1219,6 +1219,32 @@ def api_darf_desmarcar(did):
 METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5"}
 
 
+@app.route("/numero-magico")
+@login_required
+def numero_magico():
+    return render_template("numero_magico.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/numero-magico")
+@login_required
+def api_numero_magico(cid):
+    """Lista só os ativos classificados como FII/FII Infra — o 'número mágico' (quantas
+    cotas precisa ter pro dividendo pagar uma cota nova sozinho) só faz sentido pra eles."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    assets = (Asset.query.filter_by(carteira_id=cid)
+              .filter(Asset.classe.ilike("%fii%"))
+              .order_by(Asset.ordem, Asset.id).all())
+    ativos_out = [{
+        "id": a.id, "ticker": a.ticker, "classe": a.classe or "",
+        "preco": a.preco or 0, "num_acoes": a.num_acoes or 0,
+    } for a in assets]
+    return jsonify({
+        "ativos": ativos_out,
+        "carteira": {"id": c.id, "nome": c.nome, "moeda": c.moeda or "BRL"},
+    })
+
+
 @app.route("/preco-teto")
 @login_required
 def preco_teto():

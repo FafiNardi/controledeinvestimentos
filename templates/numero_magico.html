@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Número Mágico • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --gold:#eab308;
+    --page-a:var(--gold); --page-b:var(--green); --tab-txt-on:#241d02;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --gold:#a16207;
+    --tab-txt-on:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .num,td,td input{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.mini{padding:4px 8px;font-size:11.5px;border-radius:6px}
+  .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
+            border-radius:20px;font-size:11px;font-weight:700}
+
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select{max-width:240px}
+
+  .wrap{padding:0 24px 40px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .muted{color:var(--muted)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
+     text-transform:uppercase;letter-spacing:.04em}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td.ativo-cell{text-align:left;font-weight:700}
+  .empty-row td{text-align:center;color:var(--muted);padding:20px}
+  .acoes-cell{display:flex;gap:4px;justify-content:flex-end;align-items:center}
+  .badge{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+  .badge.ok{background:rgba(52,211,153,.15);color:var(--green)}
+  .badge.falta{background:rgba(245,183,84,.15);color:var(--amber)}
+  .badge.sem-dados{background:var(--panel2);color:var(--muted)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Número Mágico</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/preco-teto'">🏷️ Preço Teto</button>
+      <button class="tab-link on">🔢 Número Mágico</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="group-label">FIIs e número mágico</div>
+  <p class="muted" style="font-size:12px;max-width:900px;margin:0 0 4px">
+    Quantas cotas você precisa ter de um FII pra que o dividendo pago por elas sozinho já dê
+    pra comprar mais uma cota, sem precisar colocar dinheiro novo. Só aparecem aqui os ativos
+    classificados como <b>FII</b> ou <b>FII Infra</b> na aba Rebalanceamento. Clique em 🔄 pra
+    buscar o dividendo de cada um no Investidor10.
+  </p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th>
+          <th>Classe</th>
+          <th>Preço atual</th>
+          <th>Cotas que você tem</th>
+          <th>Dividendo mensal (méd. 12m)</th>
+          <th>Número mágico</th>
+          <th>Faltam</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="tbodyMagico"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let CID = null, DATA = { ativos: [] }, MOEDA = 'BRL';
+
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function load(){
+  const r = await fetch('/api/carteira/'+CID+'/numero-magico');
+  DATA = await r.json();
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  render();
+}
+
+// número mágico = preço da cota ÷ dividendo mensal médio (12m/12), arredondado pra cima —
+// é a quantidade de cotas cujo provento sozinho já paga uma cota nova, sem aporte
+function numeroMagico(preco, divMensal){
+  if(!preco || !divMensal) return null;
+  return Math.ceil(preco / divMensal);
+}
+
+function render(){
+  const ativos = DATA.ativos || [];
+  const tb = document.getElementById('tbodyMagico');
+  if(!ativos.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum FII encontrado nessa carteira. Classifique o ativo como "FII" ou "FII Infra" na aba Rebalanceamento pra ele aparecer aqui.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = ativos.map(a=>{
+    const divMensal = a.dividendos_12m!=null ? a.dividendos_12m/12 : null;
+    const nm = numeroMagico(a.preco, divMensal);
+    const faltam = nm!=null ? Math.max(0, nm - (a.num_acoes||0)) : null;
+    let badge = `<span class="badge sem-dados">busque o dividendo</span>`;
+    if(nm!=null){
+      badge = faltam<=0 ? `<span class="badge ok">✓ já bate</span>` : `<span class="badge falta">faltam ${faltam}</span>`;
+    }
+    return `<tr>
+      <td class="ativo-cell">${a.ticker}</td>
+      <td class="muted">${a.classe||'—'}</td>
+      <td>${BRL(a.preco)}</td>
+      <td>${(a.num_acoes||0).toLocaleString('pt-BR')}</td>
+      <td>${divMensal!=null?BRL(divMensal):'—'}</td>
+      <td>${nm!=null?nm.toLocaleString('pt-BR'):'—'}</td>
+      <td>${faltam!=null?faltam.toLocaleString('pt-BR'):'—'}</td>
+      <td class="acoes-cell">
+        ${badge}
+        <button class="mini ghost" title="Busca o dividendo dos últimos 12 meses no Investidor10"
+          onclick="buscarDividendo(${a.id},'${a.ticker}')">🔄</button>
+        <span id="statusBusca${a.id}" class="muted" style="font-size:10.5px"></span>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function buscarDividendo(assetId, ticker){
+  const st = document.getElementById('statusBusca'+assetId);
+  st.textContent = 'buscando...';
+  try{
+    const r = await fetch('/api/investidor10/'+encodeURIComponent(ticker));
+    const d = await r.json();
+    if(d.erro && !d.dividendos_12m){ st.textContent = '⚠ não achei'; setTimeout(()=>st.textContent='',4000); return; }
+    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+    if(!a) return;
+    if(d.dividendos_12m) a.dividendos_12m = d.dividendos_12m;
+    if(d.preco){
+      await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({preco:d.preco})});
+      a.preco = d.preco;
+    }
+    st.textContent = '✓ atualizado';
+    setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
+    render();
+  } catch(e){
+    st.textContent = '⚠ erro de rede';
+    setTimeout(()=>st.textContent='',4000);
+  }
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

@@ -216,10 +216,10 @@ const CLASSES_USD = ["Bond", "Cash", "ETF", "REIT", "Stocks"]
 const CLASSE_BRL_TO_USD = {"Renda Fixa":"Bond", "FII":"REIT", "Ação":"Stocks", "ETF":"ETF"};
 const CLASSE_USD_TO_BRL = {"Bond":"Renda Fixa", "REIT":"FII", "Stocks":"Ação", "ETF":"ETF"};
 function classesAtuais(){ return ["", ...(MOEDA==='USD'?CLASSES_USD:CLASSES_BRL)]; }
-const SEGMENTOS = ["", "Elétrica", "Bancos", "Fdo. de Inv.", "Fundo de Fundos",
-  "Logística", "Construtora", "Celulose", "Renda Fixa", "Shopping", "Imóveis",
-  "Tesouro Direto", "Financeira", "Lajes Corp.", "Papel", "Híbrido", "Petróleo",
-  "Seguradora", "Saneamento", "Agrícola", "Mineração", "Telecomunicação", "Outro"];
+const SEGMENTOS = ["", "Agrícola", "Bancos", "Celulose", "Construtora", "Elétrica",
+  "Fdo. de Inv.", "Financeira", "Fundo de Fundos", "Híbrido", "Imóveis", "Lajes Corp.",
+  "Logística", "Mineração", "Outro", "Papel", "Petróleo", "Renda Fixa", "Saneamento",
+  "Seguradora", "Shopping", "Telecomunicação", "Tesouro Direto"];
 
 let MOEDA = 'BRL';
 const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});

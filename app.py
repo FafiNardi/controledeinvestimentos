@@ -8,9 +8,13 @@ Carteira de Investimentos - Rebalanceamento Dinâmico (multi-usuário)
 - Cotação e Valor Patrimonial em tempo real (Yahoo Finance + Fundamentus)
 - Roda com SQLite local OU PostgreSQL na nuvem (Render) via DATABASE_URL
 """
+import csv
+import io
 import json
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -287,6 +291,83 @@ def soma_dividendos_60m(html: str) -> float | None:
             soma += v
             achou_alguma = True
     return round(soma, 4) if achou_alguma else None
+
+
+# cache simples em memória (o processo inteiro compartilha o mesmo valor — não é por usuário
+# nem por ativo) pros dois dados "macro" do Fluxo Descontado: mudam no máximo 1x por dia útil,
+# então não faz sentido baixar de novo a cada clique. 12h é só uma margem de segurança.
+_CACHE_MACRO = {}
+_CACHE_MACRO_TTL = 12 * 3600
+
+
+def _cache_macro_get_ou_calcula(chave, calcula):
+    agora = time.time()
+    cache = _CACHE_MACRO.get(chave)
+    if cache and (agora - cache["ts"]) < _CACHE_MACRO_TTL:
+        return cache["valor"]
+    valor = calcula()
+    _CACHE_MACRO[chave] = {"valor": valor, "ts": agora}
+    return valor
+
+
+def fetch_ipca_focus() -> dict:
+    """IPCA esperado pros próximos 12 meses, direto do Boletim Focus (Banco Central) — mediana
+    suavizada com base ampla de respondentes, é o número que costuma ser citado como 'o IPCA
+    projetado pelo mercado'. API pública oficial do BCB, sem chave nem autenticação."""
+    def calcula():
+        try:
+            url = ("https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/odata/"
+                   "ExpectativasMercadoInflacao12Meses?$top=1&$format=json&$orderby=Data desc"
+                   "&$filter=Indicador eq 'IPCA' and Suavizada eq 'S' and baseCalculo eq 0")
+            r = requests.get(url, headers={"Accept": "application/json"}, timeout=15)
+            r.raise_for_status()
+            valores = r.json().get("value") or []
+            if not valores:
+                return {"ipca_estimado": None, "data": None, "erro": "Focus não retornou dados"}
+            v = valores[0]
+            return {"ipca_estimado": round(v["Mediana"], 4), "data": v["Data"], "erro": None}
+        except Exception as e:  # noqa: BLE001
+            return {"ipca_estimado": None, "data": None, "erro": str(e)}
+    return _cache_macro_get_ou_calcula("ipca_focus", calcula)
+
+
+def fetch_juro_titulo_longo() -> dict:
+    """Taxa real (juro título) do Tesouro IPCA+ de prazo mais longo disponível hoje — dado
+    oficial do Tesouro Transparente (portal de dados abertos do governo, não confundir com o
+    site tesourodireto.com.br, que tem proteção anti-robô e não dá pra automatizar).
+    O arquivo é o histórico completo (~15MB, todos os títulos desde 2004) — filtra só o
+    'Tesouro IPCA+' (sem juros semestrais, é o mais simples de interpretar como taxa real
+    pura) na data mais recente, pegando o de vencimento mais distante."""
+    def calcula():
+        try:
+            url = ("https://www.tesourotransparente.gov.br/ckan/dataset/"
+                   "df56aa42-484a-4a59-8184-7676580c81e3/resource/"
+                   "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv")
+            r = requests.get(url, headers=INVESTIDOR10_HEADERS, timeout=30)
+            r.raise_for_status()
+            reader = csv.reader(io.StringIO(r.content.decode("latin-1")), delimiter=";")
+            next(reader, None)  # cabeçalho
+            data_mais_recente, melhor = None, None
+            for row in reader:
+                if len(row) < 5 or row[0].strip() != "Tesouro IPCA+":
+                    continue
+                try:
+                    d_base = datetime.strptime(row[2].strip(), "%d/%m/%Y")
+                    d_venc = datetime.strptime(row[1].strip(), "%d/%m/%Y")
+                except ValueError:
+                    continue
+                if data_mais_recente is None or d_base > data_mais_recente:
+                    data_mais_recente, melhor = d_base, None
+                if d_base == data_mais_recente and (melhor is None or d_venc > melhor[0]):
+                    melhor = (d_venc, parse_num_br(row[4]))
+            if not melhor:
+                return {"juro_titulo": None, "vencimento": None, "data": None,
+                        "erro": "Tesouro IPCA+ não encontrado no arquivo"}
+            return {"juro_titulo": melhor[1], "vencimento": melhor[0].strftime("%Y"),
+                    "data": data_mais_recente.strftime("%Y-%m-%d"), "erro": None}
+        except Exception as e:  # noqa: BLE001
+            return {"juro_titulo": None, "vencimento": None, "data": None, "erro": str(e)}
+    return _cache_macro_get_ou_calcula("juro_titulo_longo", calcula)
 
 
 def fetch_investidor10(ticker: str) -> dict:
@@ -1331,6 +1412,23 @@ def api_investidor10_historico(ticker):
     return jsonify(fetch_investidor10_historico(ticker))
 
 
+@app.route("/api/fluxo-descontado/macro")
+@login_required
+def api_fluxo_descontado_macro():
+    """Juro título (Tesouro IPCA+ mais longo, Tesouro Transparente) + IPCA esperado (Focus,
+    Banco Central) pro método Fluxo Descontado — os dois únicos campos que não vêm do
+    Investidor10 e antes tinham que ser digitados de cabeça. É o mesmo dado pra qualquer
+    ativo/usuário (cacheado 12h), então não depende de ticker."""
+    juro = fetch_juro_titulo_longo()
+    ipca = fetch_ipca_focus()
+    return jsonify({
+        "juro_titulo": juro["juro_titulo"], "juro_titulo_vencimento": juro["vencimento"],
+        "juro_titulo_data": juro["data"],
+        "ipca_estimado": ipca["ipca_estimado"], "ipca_data": ipca["data"],
+        "erro": juro["erro"] or ipca["erro"],
+    })
+
+
 def ensure_schema():
     """Adiciona colunas novas em tabelas já existentes (SQLite e PostgreSQL).
 
@@ -1377,6 +1475,13 @@ def ensure_schema():
 with app.app_context():
     db.create_all()
     ensure_schema()
+
+# baixa os dados "macro" do Fluxo Descontado em background assim que o processo sobe — o
+# arquivo do Tesouro Transparente é grande (~15MB) e demora uns 20s pra baixar; pré-aquecendo
+# o cache no boot, quem clicar em "buscar" na prática nunca sente essa espera (a não ser que
+# clique nos primeiros segundos de vida do processo, antes da thread terminar)
+threading.Thread(target=lambda: (fetch_ipca_focus(), fetch_juro_titulo_longo()),
+                  daemon=True).start()
 
 
 if __name__ == "__main__":

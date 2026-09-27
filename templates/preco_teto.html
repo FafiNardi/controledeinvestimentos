@@ -346,6 +346,14 @@ function botaoBuscar(a){
       onclick="buscarDadosInvestidor10(${a.id},'${a.ticker}')">🔄</button>
     <span id="statusBusca${a.id}" class="muted" style="font-size:10.5px"></span>` : '';
 }
+function botaoBuscarMacro(a){
+  if(!EDIT) return '';
+  return `<p class="muted" style="font-size:12px;margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <button class="mini ghost" title="Busca o Juro título (Tesouro IPCA+ mais longo, Tesouro Transparente) e o IPCA esperado (Boletim Focus, Banco Central) — pode demorar até ~30s na primeira busca do dia, depois fica em cache"
+      onclick="buscarMacroFluxoDescontado(${a.id})">🔄 Buscar Juro título + IPCA</button>
+    <span id="statusMacro${a.id}"></span>
+  </p>`;
+}
 
 function tetosDoAtivo(a){
   return {
@@ -537,6 +545,7 @@ function renderEditor(){
       <div class="view-tabs" style="margin-top:0">${pillsMetodo}</div>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 10px"><b style="color:var(--${info.cor})">${info.nome}</b> — ${info.desc}</p>
+    ${METODO_EDITANDO==='fluxo_descontado' ? botaoBuscarMacro(a) : ''}
     <div class="editor-fields">${camposPorMetodo[METODO_EDITANDO]()}</div>
     <div class="editor-resultado">
       <div class="item"><div class="k">Teto (${info.nome})</div><div class="v">${teto==null?'—':BRL(teto)}</div></div>
@@ -546,6 +555,36 @@ function renderEditor(){
 }
 
 // ---------------------------------------------------------------- ações
+
+async function buscarMacroFluxoDescontado(assetId){
+  const st = document.getElementById('statusMacro'+assetId);
+  st.textContent = 'buscando... (pode demorar até 30s)';
+  st.className = 'muted';
+  try{
+    const r = await fetch('/api/fluxo-descontado/macro');
+    const d = await r.json();
+    if(d.juro_titulo==null && d.ipca_estimado==null){
+      st.textContent = '⚠ ' + (d.erro || 'não consegui buscar');
+      st.className = 'neg';
+      return;
+    }
+    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+    if(!a) return;
+    const fluxo = {...(a.premissas.fluxo_descontado||{})};
+    if(d.juro_titulo!=null) fluxo.juro_titulo = d.juro_titulo;
+    if(d.ipca_estimado!=null) fluxo.ipca_estimado = d.ipca_estimado;
+    a.premissas.fluxo_descontado = fluxo;
+    await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
+    st.textContent = `✓ Tesouro IPCA+ ${d.juro_titulo_vencimento||''} (${d.juro_titulo_data||'—'}) · IPCA Focus (${d.ipca_data||'—'})`;
+    st.className = 'pos';
+    setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
+    renderResumo(); renderEditor();
+  } catch(e){
+    st.textContent = '⚠ erro de rede';
+    st.className = 'neg';
+  }
+}
 
 async function buscarDadosInvestidor10(assetId, ticker){
   const st = document.getElementById('statusBusca'+assetId);

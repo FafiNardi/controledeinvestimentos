@@ -285,16 +285,19 @@ function tetoFluxoDescontado(dados){
   if(taxaFinal <= 0) return null;
   return fluxoAno1 / (taxaFinal/100);
 }
-// projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro (LPA) dos
-// últimos 5 anos, e acha o preço que faria esse dividendo render pelo menos o yield mínimo
-// (padrão 8%). O crescimento do ROE é só informativo aqui, não entra nessa conta.
+// pega a média anual de dividendos dos últimos 5 anos (soma 60m ÷ 5 — igual ao Barsi, pra
+// ficar em linha com o resto do modelo, que já é todo baseado em médias de 5 anos), projeta
+// crescendo na mesma taxa média do lucro (LPA) dos últimos 5 anos, e acha o preço que faria
+// esse dividendo render pelo menos o yield mínimo (padrão 8%). O crescimento do ROE é só
+// informativo aqui, não entra nessa conta.
 function tetoCrescimentoHistorico(dados){
-  const divAtual = dados.dividendos_12m || 0;
-  if(!divAtual) return null;
+  const div60 = dados.dividendos_60m || 0;
+  if(!div60) return null;
+  const mediaAnual = div60 / 5;
   const crescLucro = dados.crescimento_lucro || 0;
   const yieldMin = dados.yield_minimo != null ? dados.yield_minimo : 8;
   if(!yieldMin) return null;
-  const divProjetado = divAtual * (1 + crescLucro/100);
+  const divProjetado = mediaAnual * (1 + crescLucro/100);
   return divProjetado / (yieldMin/100);
 }
 function distancia(teto, precoAtual){
@@ -478,11 +481,15 @@ function renderEditor(){
 
   const camposPorMetodo = {
     bazin: ()=>`
-      <div class="editor-field"><label>Dividendos 12m</label>${inputPremissa(a.id,'bazin','dividendos_12m',d.dividendos_12m,dis)}</div>
-      <div class="editor-field"><label>Yield mín.</label>${inputPremissa(a.id,'bazin','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}</div>`,
+      <div class="editor-field"><label>Dividendos 12m<span class="ajuda" title="Total pago em dinheiro por ação nos últimos 12 meses">?</span></label>${inputPremissa(a.id,'bazin','dividendos_12m',d.dividendos_12m,dis)}
+        <span class="hint">Total pago por ação nos últimos 12 meses</span></div>
+      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'bazin','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}
+        <span class="hint">Retorno mínimo em dividendos que você exige — padrão 6%</span></div>`,
     barsi: ()=>`
-      <div class="editor-field"><label>Soma dividendos 60m</label>${inputPremissa(a.id,'barsi','dividendos_60m',d.dividendos_60m,dis)}</div>
-      <div class="editor-field"><label>Yield mín.</label>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}</div>`,
+      <div class="editor-field"><label>Soma dividendos 60m<span class="ajuda" title="Soma (não a média) de tudo pago em 5 anos">?</span></label>${inputPremissa(a.id,'barsi','dividendos_60m',d.dividendos_60m,dis)}
+        <span class="hint">Soma de tudo pago por ação nos últimos 5 anos (a conta já divide por 5 pra achar a média anual)</span></div>
+      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}
+        <span class="hint">Retorno mínimo em dividendos que você exige — padrão 6%</span></div>`,
     fluxo_descontado: ()=>`
       <div class="editor-field"><label>Fluxo atual<span class="ajuda" title="LPA (ações) ou dividendo/cota (FIIs)">?</span></label>${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',d.fluxo_atual,dis)}
         <span class="hint">LPA (ações) ou dividendo/cota (FIIs)</span></div>
@@ -502,11 +509,16 @@ function renderEditor(){
       const consistente = d.dividendos_consistentes;
       const consistenteTxt = consistente==null ? '—' : (consistente ? '<span class="pos">✓ sim</span>' : '<span class="neg">✗ não</span>');
       return `
-      <div class="editor-field"><label>Dividendos 12m</label>${inputPremissa(a.id,'cresc5','dividendos_12m',d.dividendos_12m,dis)}</div>
-      <div class="editor-field"><label>Cresc. lucro (5a)</label>${inputPremissa(a.id,'cresc5','crescimento_lucro',d.crescimento_lucro,dis)}</div>
-      <div class="editor-field"><label title="Só informativo, não entra na conta do teto">ROE (5a)</label><div style="padding:6px 0">${d.crescimento_roe!=null?PCT(d.crescimento_roe):'—'}</div></div>
-      <div class="editor-field"><label>Consistente?</label><div style="padding:6px 0">${consistenteTxt}</div></div>
-      <div class="editor-field"><label>Yield mín.</label>${inputPremissa(a.id,'cresc5','yield_minimo',d.yield_minimo!=null?d.yield_minimo:8,dis)}</div>`;
+      <div class="editor-field"><label>Soma dividendos 60m<span class="ajuda" title="Soma (não a média) de tudo pago em 5 anos">?</span></label>${inputPremissa(a.id,'cresc5','dividendos_60m',d.dividendos_60m,dis)}
+        <span class="hint">Soma de tudo pago por ação nos últimos 5 anos — a conta usa a média anual (÷5) como base</span></div>
+      <div class="editor-field"><label>Cresc. lucro (5a)<span class="ajuda" title="Crescimento médio anual do LPA nos últimos 5 anos">?</span></label>${inputPremissa(a.id,'cresc5','crescimento_lucro',d.crescimento_lucro,dis)}
+        <span class="hint">Crescimento médio anual do lucro por ação (LPA) nos últimos 5 anos — projeta o dividendo pra frente</span></div>
+      <div class="editor-field"><label>ROE (5a)<span class="ajuda" title="Só informativo, não entra na conta do teto">?</span></label><div style="padding:6px 0">${d.crescimento_roe!=null?PCT(d.crescimento_roe):'—'}</div>
+        <span class="hint">Crescimento médio do ROE em 5 anos — só selo de qualidade, não entra na conta</span></div>
+      <div class="editor-field"><label>Consistente?<span class="ajuda" title="Se pagou dividendo positivo em todos os últimos 5 anos">?</span></label><div style="padding:6px 0">${consistenteTxt}</div>
+        <span class="hint">Pagou dividendo em todos os últimos 5 anos, sem interrupção?</span></div>
+      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'cresc5','yield_minimo',d.yield_minimo!=null?d.yield_minimo:8,dis)}
+        <span class="hint">Retorno mínimo em dividendos que você exige — padrão 8%</span></div>`;
     },
   };
 
@@ -543,13 +555,20 @@ async function buscarDadosInvestidor10(assetId, ticker){
     const a = (DATA.ativos||[]).find(x=>x.id===assetId);
     if(!a) return;
     // preenche o Bazin com os dividendos de 12 meses achados — é exatamente o dado que
-    // esse método pede. O Barsi (soma de 60 meses) o Investidor10 não expõe pronto numa
-    // conta só, então esse campo continua manual por enquanto.
+    // esse método pede
     if(d.dividendos_12m){
       a.premissas.bazin = a.premissas.bazin || {};
       a.premissas.bazin.dividendos_12m = d.dividendos_12m;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:assetId, metodo:'bazin', dados:a.premissas.bazin})});
+    }
+    // Barsi pede a soma de 60 meses — soma o valor de cada pagamento da tabela de histórico
+    // de proventos do Investidor10 cuja data caiu nos últimos 5 anos
+    if(d.dividendos_60m){
+      a.premissas.barsi = a.premissas.barsi || {};
+      a.premissas.barsi.dividendos_60m = d.dividendos_60m;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:assetId, metodo:'barsi', dados:a.premissas.barsi})});
     }
     // LPA vira o "fluxo atual" do método de fluxo descontado (é o mesmo número, só que lá
     // ele é genérico pra também aceitar dividendo/cota manual no caso de FIIs)
@@ -571,7 +590,7 @@ async function buscarDadosInvestidor10(assetId, ticker){
       const rh = await fetch('/api/investidor10-historico/'+encodeURIComponent(ticker));
       const dh = await rh.json();
       if(dh.crescimento_lucro!=null || dh.crescimento_roe!=null){
-        const cresc5 = {...(a.premissas.cresc5||{}), dividendos_12m:d.dividendos_12m||0,
+        const cresc5 = {...(a.premissas.cresc5||{}), dividendos_60m:d.dividendos_60m||0,
           crescimento_lucro:dh.crescimento_lucro||0, crescimento_roe:dh.crescimento_roe,
           dividendos_consistentes: dh.dividendos_consistentes ? 1 : 0};
         a.premissas.cresc5 = cresc5;

@@ -11,7 +11,7 @@ Carteira de Investimentos - Rebalanceamento Dinâmico (multi-usuário)
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import yfinance as yf
@@ -250,6 +250,44 @@ def parse_num_br(s: str):
 
 INVESTIDOR10_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
 
+# tipos de evento na tabela de histórico de proventos que NÃO são dinheiro pago de verdade
+# (são eventos societários — bonificação/desdobramento mudam a quantidade de ações, não
+# distribuem valor) e por isso não entram na soma de dividendos
+_TIPOS_PROVENTO_NAO_CAIXA = ("bonific", "desdobr", "grupam")
+
+
+def soma_dividendos_60m(html: str) -> float | None:
+    """Soma o valor pago por ação (coluna 'valor') de cada linha da tabela de histórico de
+    proventos ('table-dividends-history') cuja 'data com' caiu nos últimos 60 meses. O regex
+    não fecha a última </td> logo após o número porque várias linhas têm um tooltip
+    (<span>...) colado depois do valor — fechar ali derrubava boa parte das linhas antigas."""
+    m = re.search(r'<table id="table-dividends-history".*?</table>', html, re.S)
+    if not m:
+        return None
+    linhas = re.findall(
+        r'<tr class="visible-(?:even|odd)">\s*<td class="text-center">([^<]*)</td>\s*'
+        r'<td class="text-center">([^<]*)</td>\s*<td class="text-center">([^<]*)</td>\s*'
+        r'<td class="text-center">\s*([\d.,]+)', m.group(0))
+    if not linhas:
+        return None
+    limite = datetime.now() - timedelta(days=365 * 5)
+    soma = 0.0
+    achou_alguma = False
+    for tipo, data_com, _pagamento, valor in linhas:
+        if any(t in tipo.strip().lower() for t in _TIPOS_PROVENTO_NAO_CAIXA):
+            continue
+        try:
+            dt = datetime.strptime(data_com.strip(), "%d/%m/%Y")
+        except ValueError:
+            continue
+        if dt > datetime.now() or dt < limite:
+            continue
+        v = parse_num_br(valor.strip())
+        if v is not None:
+            soma += v
+            achou_alguma = True
+    return round(soma, 4) if achou_alguma else None
+
 
 def fetch_investidor10(ticker: str) -> dict:
     """Extrai cotação e indicadores fundamentalistas do investidor10.com.br.
@@ -260,10 +298,15 @@ def fetch_investidor10(ticker: str) -> dict:
     - P/VP e DY (FIIs): dentro de blocos <div class="_card vp/dy">...<span>Y</span>
     - Dividendos dos últimos 12 meses (ações e FIIs): frase fixa do texto de perguntas
       frequentes da própria página ("Nos últimos 12 meses ... pagou um total de R$ X")
+    - Soma dos dividendos dos últimos 60 meses (pro método Barsi e pro Crescimento
+      Histórico): soma o valor de cada pagamento na tabela "table-dividends-history"
+      (histórico completo de proventos por ação) cuja data-com caiu nos últimos 5 anos —
+      ignora eventos que não são dinheiro de verdade (bonificação, desdobramento etc.)
     """
     t = ticker.strip().lower()
     out = {"preco": None, "vpa": None, "pvp": None, "dy": None,
-           "lpa": None, "roe": None, "payout": None, "dividendos_12m": None, "erro": None}
+           "lpa": None, "roe": None, "payout": None, "dividendos_12m": None,
+           "dividendos_60m": None, "erro": None}
     for tipo in ("acoes", "fiis"):
         try:
             r = requests.get(f"https://investidor10.com.br/{tipo}/{t}/",
@@ -297,6 +340,7 @@ def fetch_investidor10(ticker: str) -> dict:
             mdiv = re.search(r"Nos últimos 12 meses,.*?pagou um total de R\$\s*([\d.,]+) em dividendos", html)
             if mdiv:
                 out["dividendos_12m"] = parse_num_br(mdiv.group(1))
+            out["dividendos_60m"] = soma_dividendos_60m(html)
             return out
         except Exception as e:  # noqa: BLE001
             out["erro"] = str(e)
@@ -1262,16 +1306,27 @@ def api_investidor10_historico(ticker):
 
 
 def ensure_schema():
-    """Adiciona colunas novas em tabelas já existentes (SQLite e PostgreSQL)."""
+    """Adiciona colunas novas em tabelas já existentes (SQLite e PostgreSQL).
+
+    Cada tabela só é inspecionada uma vez (has_table + get_columns ficam em cache local) —
+    antes cada chamada de add() ia de novo ao banco, e num Postgres remoto (Neon) cada ida a
+    mais é um round-trip de rede que soma no tempo de boot do processo."""
     from sqlalchemy import inspect, text
     insp = inspect(db.engine)
+    cache_cols = {}
+
+    def colunas_de(tabela):
+        if tabela not in cache_cols:
+            cache_cols[tabela] = ([c["name"] for c in insp.get_columns(tabela)]
+                                   if insp.has_table(tabela) else None)
+        return cache_cols[tabela]
 
     def add(tabela, coluna, ddl):
-        if insp.has_table(tabela):
-            cols = [c["name"] for c in insp.get_columns(tabela)]
-            if coluna not in cols:
-                db.session.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {ddl}"))
-                db.session.commit()
+        cols = colunas_de(tabela)
+        if cols is not None and coluna not in cols:
+            db.session.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {ddl}"))
+            db.session.commit()
+            cols.append(coluna)
 
     add("carteira", "renda_ref", "renda_ref FLOAT DEFAULT 3457")
     add("carteira", "renda_ref_json", "renda_ref_json TEXT")
@@ -1284,8 +1339,8 @@ def ensure_schema():
     add("asset", "oculto_preco_teto", "oculto_preco_teto INTEGER DEFAULT 0")
     add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
     add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
-    if insp.has_table("rent_ativo"):
-        cols = [c["name"] for c in insp.get_columns("rent_ativo")]
+    cols = colunas_de("rent_ativo")
+    if cols is not None:
         if "classe" in cols and "is_caixa" in cols:
             db.session.execute(text(
                 "UPDATE rent_ativo SET classe='Caixa' WHERE is_caixa=1 "

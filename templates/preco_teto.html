@@ -286,19 +286,20 @@ function tetoFluxoDescontado(dados){
   if(taxaFinal <= 0) return null;
   return fluxoAno1 / (taxaFinal/100);
 }
-// pega a média anual de dividendos dos últimos 5 anos (soma 60m ÷ 5 — igual ao Barsi, pra
-// ficar em linha com o resto do modelo, que já é todo baseado em médias de 5 anos), projeta
-// crescendo na mesma taxa média do lucro (LPA) dos últimos 5 anos, e acha o preço que faria
-// esse dividendo render pelo menos o yield mínimo (padrão 8%). O crescimento do ROE é só
+// pega o dividendo dos últimos 12 meses (o "atual" de verdade — mesmo campo que o Bazin já
+// busca) e projeta crescendo na mesma taxa média do lucro (LPA) dos últimos 5 anos. Usar uma
+// MÉDIA de 5 anos como base (testado antes) subestima empresas em trajetória de crescimento
+// consistente — a média sempre fica atrás do valor mais recente, e o crescimento aplicado em
+// cima não compensa essa defasagem. O "5 anos" do modelo entra pela taxa de crescimento e
+// pelo selo de consistência, não pela base do dividendo. O crescimento do ROE é só
 // informativo aqui, não entra nessa conta.
 function tetoCrescimentoHistorico(dados){
-  const div60 = dados.dividendos_60m || 0;
-  if(!div60) return null;
-  const mediaAnual = div60 / 5;
+  const divAtual = dados.dividendos_12m || 0;
+  if(!divAtual) return null;
   const crescLucro = dados.crescimento_lucro || 0;
   const yieldMin = dados.yield_minimo != null ? dados.yield_minimo : 8;
   if(!yieldMin) return null;
-  const divProjetado = mediaAnual * (1 + crescLucro/100);
+  const divProjetado = divAtual * (1 + crescLucro/100);
   return divProjetado / (yieldMin/100);
 }
 function distancia(teto, precoAtual){
@@ -510,8 +511,8 @@ function renderEditor(){
       const consistente = d.dividendos_consistentes;
       const consistenteTxt = consistente==null ? '—' : (consistente ? '<span class="pos">✓ sim</span>' : '<span class="neg">✗ não</span>');
       return `
-      <div class="editor-field"><label>Soma dividendos 60m<span class="ajuda" title="Soma (não a média) de tudo pago em 5 anos">?</span></label>${inputPremissa(a.id,'cresc5','dividendos_60m',d.dividendos_60m,dis)}
-        <span class="hint">Soma de tudo pago por ação nos últimos 5 anos — a conta usa a média anual (÷5) como base</span></div>
+      <div class="editor-field"><label>Dividendos 12m<span class="ajuda" title="Total pago em dinheiro por ação nos últimos 12 meses">?</span></label>${inputPremissa(a.id,'cresc5','dividendos_12m',d.dividendos_12m,dis)}
+        <span class="hint">Total pago por ação nos últimos 12 meses — a base que a taxa de crescimento projeta pra frente</span></div>
       <div class="editor-field"><label>Cresc. lucro (5a)<span class="ajuda" title="Crescimento médio anual do LPA nos últimos 5 anos">?</span></label>${inputPremissa(a.id,'cresc5','crescimento_lucro',d.crescimento_lucro,dis)}
         <span class="hint">Crescimento médio anual do lucro por ação (LPA) nos últimos 5 anos — projeta o dividendo pra frente</span></div>
       <div class="editor-field"><label>ROE (5a)<span class="ajuda" title="Só informativo, não entra na conta do teto">?</span></label><div style="padding:6px 0">${d.crescimento_roe!=null?PCT(d.crescimento_roe):'—'}</div>
@@ -591,7 +592,7 @@ async function buscarDadosInvestidor10(assetId, ticker){
       const rh = await fetch('/api/investidor10-historico/'+encodeURIComponent(ticker));
       const dh = await rh.json();
       if(dh.crescimento_lucro!=null || dh.crescimento_roe!=null){
-        const cresc5 = {...(a.premissas.cresc5||{}), dividendos_60m:d.dividendos_60m||0,
+        const cresc5 = {...(a.premissas.cresc5||{}), dividendos_12m:d.dividendos_12m||0,
           crescimento_lucro:dh.crescimento_lucro||0, crescimento_roe:dh.crescimento_roe,
           dividendos_consistentes: dh.dividendos_consistentes ? 1 : 0};
         a.premissas.cresc5 = cresc5;

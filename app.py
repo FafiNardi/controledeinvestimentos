@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 import requests
@@ -825,12 +826,30 @@ def api_delete_asset(aid):
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
+    """Busca a cotação de cada ativo em paralelo (até 8 de cada vez) — com carteiras grandes
+    (40-50+ ativos), buscar um por um a ~1s cada facilmente passava dos 30s de timeout padrão
+    do gunicorn, que mata o processo ANTES do commit no fim do loop rodar: a atualização
+    inteira sumia sem erro nenhum pro usuário.
+
+    As threads do pool só fazem a parte de rede (fetch_quote com ticker/moeda, sem tocar em
+    nenhum objeto do banco) — passar um Asset do SQLAlchemy pra dentro de uma thread quebra,
+    porque a sessão do Flask-SQLAlchemy é presa ao contexto da aplicação, que essas threads não
+    têm. A escrita no banco acontece depois, de volta na thread principal, com os resultados
+    já prontos."""
     c = get_carteira_or_404(cid)
     require_owner(c)  # carteira agora é privada: só o dono mexe (antes qualquer logado podia)
     assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
+    moeda = c.moeda or "BRL"
+
+    respostas = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futuros = {ex.submit(fetch_quote, a.ticker, moeda): a.id for a in assets}
+        for fut in as_completed(futuros):
+            respostas[futuros[fut]] = fut.result()
+
     resultados = []
     for a in assets:
-        q = fetch_quote(a.ticker, c.moeda or "BRL")
+        q = respostas[a.id]
         if q["preco"]:
             a.preco = q["preco"]
             a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)

@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --timeout 90
     envVars:
       - key: SECRET_KEY
         generateValue: true          # senha de sessão gerada automaticamente

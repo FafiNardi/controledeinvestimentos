@@ -1316,7 +1316,7 @@ def api_darf_desmarcar(did):
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #
 
-METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5"}
+METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5", "graham"}
 
 
 @app.route("/numero-magico")

@@ -10,13 +10,13 @@
   :root{
     --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
     --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
-    --green:#34d399; --red:#f87171; --amber:#f5b754; --gold:#eab308;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --gold:#eab308; --purple:#c084fc;
     --page-a:var(--green); --page-b:var(--gold); --tab-txt-on:#04211d;
   }
   html[data-theme="light"]{
     --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
     --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
-    --green:#16a34a; --red:#dc2626; --amber:#b45309; --gold:#a16207;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --gold:#a16207; --purple:#9333ea;
     --tab-txt-on:#fff;
   }
   *{box-sizing:border-box}
@@ -79,7 +79,7 @@
   th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
      text-transform:uppercase;letter-spacing:.04em}
   th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)} th.grp-fluxo{color:var(--blue)}
-  th.grp-cresc5{color:var(--red)}
+  th.grp-cresc5{color:var(--red)} th.grp-graham{color:var(--purple)}
   td:first-child,th:first-child{text-align:left}
   tbody tr:last-child td{border-bottom:0}
   tr:hover td{background:var(--panel2)}
@@ -100,6 +100,7 @@
   .view-tab[data-metodo="barsi"].on{background:var(--gold)}
   .view-tab[data-metodo="fluxo_descontado"].on{background:var(--blue)}
   .view-tab[data-metodo="cresc5"].on{background:var(--red)}
+  .view-tab[data-metodo="graham"].on{background:var(--purple)}
   .resumo-teto{font-weight:700}
   .resumo-teto.melhor{text-decoration:underline;text-underline-offset:3px}
   tr.linha-editando td{background:rgba(91,141,239,.1)}
@@ -187,6 +188,7 @@
           <th>Preço atual</th>
           <th class="grp-bazin">Teto Bazin</th><th class="grp-barsi">Teto Barsi</th>
           <th class="grp-fluxo">Teto Fluxo Desc.</th><th class="grp-cresc5">Teto Cresc. Hist.</th>
+          <th class="grp-graham">Teto Graham</th>
           <th>Melhor teto</th><th>Distância</th><th></th>
         </tr></thead>
         <tbody id="tbodyResumo"></tbody>
@@ -302,6 +304,21 @@ function tetoCrescimentoHistorico(dados){
   const divProjetado = divAtual * (1 + crescLucro/100);
   return divProjetado / (yieldMin/100);
 }
+// Número de Graham (Benjamin Graham, "O Investidor Inteligente"): preço justo = raiz de
+// 22,5 × LPA × VPA. O 22,5 vem de Graham limitar o P/L a no máximo 15x e o P/VP a no máximo
+// 1,5x — 15 × 1,5 = 22,5. Só funciona pra empresa com lucro E patrimônio líquido positivos
+// (raiz de número negativo não existe); banco/seguradora também não é o público-alvo original
+// da fórmula (Graham pensou nela pra indústria/comércio tradicional, não financeiras).
+// Margem de segurança opcional: desconta um % do preço justo antes de usar como teto, pra
+// quem quiser folga adicional (padrão 0% = fórmula pura do livro).
+function tetoGraham(dados){
+  const lpa = dados.lpa || 0;
+  const vpa = dados.vpa || 0;
+  if(lpa <= 0 || vpa <= 0) return null;
+  const precoJusto = Math.sqrt(22.5 * lpa * vpa);
+  const margem = dados.margem_seguranca || 0;
+  return precoJusto * (1 - margem/100);
+}
 function distancia(teto, precoAtual){
   if(teto==null || !precoAtual) return null;
   return (teto - precoAtual) / precoAtual * 100;
@@ -312,6 +329,7 @@ const METODOS_INFO = {
   barsi: {nome:'Barsi', cor:'gold', desc:'Soma dos dividendos dos últimos 60 meses ÷ 5 (média anual) ÷ yield mínimo desejado.'},
   fluxo_descontado: {nome:'Fluxo Descontado', cor:'blue', desc:'Projeta o lucro (ações) ou dividendo (FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença entre o retorno mínimo exigido (IPCA + juro real de um título longo) e o crescimento na perpetuidade.'},
   cresc5: {nome:'Crescimento Histórico', cor:'red', desc:'Projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro dos últimos 5 anos, e acha o preço que faria esse dividendo render o yield mínimo. O crescimento do ROE e a consistência de dividendos aparecem só como informação de qualidade.'},
+  graham: {nome:'Graham', cor:'purple', desc:'Preço justo de Benjamin Graham: raiz quadrada de 22,5 × LPA × VPA (15x lucro, 1,5x patrimônio — os limites máximos que Graham aceitava pagar). Só funciona com lucro e patrimônio líquido positivos.'},
 };
 let ATIVO_EDITANDO = null;   // id do asset selecionado no editor
 let METODO_EDITANDO = 'bazin';
@@ -361,6 +379,7 @@ function tetosDoAtivo(a){
     barsi: tetoBarsi(a.premissas.barsi||{}),
     fluxo_descontado: tetoFluxoDescontado(a.premissas.fluxo_descontado||{}),
     cresc5: tetoCrescimentoHistorico(a.premissas.cresc5||{}),
+    graham: tetoGraham(a.premissas.graham||{}),
   };
 }
 
@@ -391,7 +410,7 @@ function renderResumo(){
 
   const tb = document.getElementById('tbodyResumo');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhum ativo encontrado.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum ativo encontrado.</td></tr>`;
     return;
   }
   tb.innerHTML = ativos.map(a=>{
@@ -407,6 +426,7 @@ function renderResumo(){
       <td class="grp-barsi">${t.barsi==null?'—':BRL(t.barsi)}</td>
       <td class="grp-fluxo">${t.fluxo_descontado==null?'—':BRL(t.fluxo_descontado)}</td>
       <td class="grp-cresc5">${t.cresc5==null?'—':BRL(t.cresc5)}</td>
+      <td class="grp-graham">${t.graham==null?'—':BRL(t.graham)}</td>
       <td class="resumo-teto melhor">${melhor==null?'—':BRL(melhor)}</td>
       <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
       <td class="acoes-cell">
@@ -530,9 +550,16 @@ function renderEditor(){
       <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'cresc5','yield_minimo',d.yield_minimo!=null?d.yield_minimo:8,dis)}
         <span class="hint">Retorno mínimo em dividendos que você exige — padrão 8%</span></div>`;
     },
+    graham: ()=>`
+      <div class="editor-field"><label>LPA<span class="ajuda" title="Lucro por ação dos últimos 12 meses">?</span></label>${inputPremissa(a.id,'graham','lpa',d.lpa,dis)}
+        <span class="hint">Lucro por ação dos últimos 12 meses</span></div>
+      <div class="editor-field"><label>VPA<span class="ajuda" title="Valor Patrimonial por Ação">?</span></label>${inputPremissa(a.id,'graham','vpa',d.vpa,dis)}
+        <span class="hint">Valor patrimonial por ação (patrimônio líquido ÷ nº de ações)</span></div>
+      <div class="editor-field"><label>Margem segur.<span class="ajuda" title="Desconto sobre o preço justo, pra folga extra">?</span></label>${inputPremissa(a.id,'graham','margem_seguranca',d.margem_seguranca!=null?d.margem_seguranca:0,dis)}
+        <span class="hint">Desconto sobre o preço justo calculado — padrão 0% (fórmula original)</span></div>`,
   };
 
-  const funcTeto = {bazin:tetoBazin, barsi:tetoBarsi, fluxo_descontado:tetoFluxoDescontado, cresc5:tetoCrescimentoHistorico}[METODO_EDITANDO];
+  const funcTeto = {bazin:tetoBazin, barsi:tetoBarsi, fluxo_descontado:tetoFluxoDescontado, cresc5:tetoCrescimentoHistorico, graham:tetoGraham}[METODO_EDITANDO];
   const teto = funcTeto(d);
   const dist = distancia(teto, a.preco);
 
@@ -618,6 +645,14 @@ async function buscarDadosInvestidor10(assetId, ticker){
       a.premissas.fluxo_descontado = fluxo;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
+    }
+    // Graham usa LPA (já buscado acima) + VPA — os dois já vêm prontos do Investidor10,
+    // sem precisar de nenhuma conta extra
+    if(d.lpa || d.vpa){
+      const graham = {...(a.premissas.graham||{}), lpa:d.lpa||0, vpa:d.vpa||0};
+      a.premissas.graham = graham;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:assetId, metodo:'graham', dados:graham})});
     }
     if(d.preco){
       await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},

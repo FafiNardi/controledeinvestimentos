@@ -78,13 +78,21 @@
   .toolbar{display:flex;align-items:center;gap:14px;padding:6px 24px 16px;flex-wrap:wrap}
   .toolbar label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
   .wrap{padding:0 24px 60px}
-  table{width:100%;border-collapse:collapse;font-size:12.5px}
-  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis}
   th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:600;
      font-size:11px;text-transform:uppercase;letter-spacing:.3px;z-index:2}
   th.sortable{cursor:pointer;user-select:none}
   th.sortable:hover{color:var(--txt)}
   th .arr{color:var(--accent);font-size:10px}
+  /* alça de arrastar na borda direita de cada cabeçalho — arrasta pra redimensionar a
+     coluna inteira (via <colgroup>). position:sticky no th já cria um bloco de referência
+     pra essa alça absoluta, não precisa de position:relative extra */
+  .col-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;
+               z-index:3}
+  .col-resizer:hover,.col-resizer.resizing{background:var(--accent);opacity:.5}
   .pct-cell{width:64px}
   .pct-inp{text-align:right}
   td:first-child,th:first-child{text-align:left}
@@ -166,26 +174,35 @@
 </div>
 
 <div class="wrap">
-  <table>
+  <div class="tbl-scroll">
+  <table id="tabelaAtivos">
+    <colgroup>
+      <col style="width:110px"><col style="width:90px"><col style="width:90px">
+      <col style="width:60px"><col style="width:70px"><col style="width:70px">
+      <col style="width:100px"><col style="width:70px"><col style="width:110px">
+      <col style="width:120px"><col style="width:100px"><col style="width:64px">
+      <col style="width:70px"><col style="width:100px"><col style="width:100px">
+      <col style="width:90px"><col style="width:120px"><col style="width:36px">
+    </colgroup>
     <thead>
       <tr>
-        <th class="sortable" data-sort="ticker">Ativo</th>
-        <th class="sortable" data-sort="preco">Preço</th>
-        <th class="sortable" data-sort="vpa">Val. Patr.</th>
-        <th class="sortable" data-sort="pvp">P/VP</th>
-        <th class="sortable" data-sort="dy">DY 12m</th>
-        <th class="sortable" data-sort="num_acoes">Qtd.</th>
-        <th class="sortable" data-sort="preco_medio">Preço Médio</th>
-        <th class="sortable" data-sort="rentabilidade">Rentab.</th>
-        <th class="sortable" data-sort="classe">Classe</th>
-        <th class="sortable" data-sort="segmento">Segmento</th>
-        <th class="sortable" data-sort="tenho">Tenho R$</th>
-        <th class="sortable pct-cell" data-sort="pct_ideal">% Ideal</th>
-        <th class="sortable" data-sort="pct_tenho">% Tenho</th>
-        <th class="sortable" data-sort="quero">Quero R$</th>
-        <th class="sortable" data-sort="falta">Falta R$</th>
-        <th class="sortable" data-sort="decisao">Ação</th>
-        <th class="sortable" data-sort="qtd_cotas">Cotas p/comprar</th><th></th>
+        <th class="sortable" data-sort="ticker">Ativo<span class="col-resizer" data-col="0"></span></th>
+        <th class="sortable" data-sort="preco">Preço<span class="col-resizer" data-col="1"></span></th>
+        <th class="sortable" data-sort="vpa">Val. Patr.<span class="col-resizer" data-col="2"></span></th>
+        <th class="sortable" data-sort="pvp">P/VP<span class="col-resizer" data-col="3"></span></th>
+        <th class="sortable" data-sort="dy">DY 12m<span class="col-resizer" data-col="4"></span></th>
+        <th class="sortable" data-sort="num_acoes">Qtd.<span class="col-resizer" data-col="5"></span></th>
+        <th class="sortable" data-sort="preco_medio">Preço Médio<span class="col-resizer" data-col="6"></span></th>
+        <th class="sortable" data-sort="rentabilidade">Rentab.<span class="col-resizer" data-col="7"></span></th>
+        <th class="sortable" data-sort="classe">Classe<span class="col-resizer" data-col="8"></span></th>
+        <th class="sortable" data-sort="segmento">Segmento<span class="col-resizer" data-col="9"></span></th>
+        <th class="sortable" data-sort="tenho">Tenho R$<span class="col-resizer" data-col="10"></span></th>
+        <th class="sortable pct-cell" data-sort="pct_ideal">% Ideal<span class="col-resizer" data-col="11"></span></th>
+        <th class="sortable" data-sort="pct_tenho">% Tenho<span class="col-resizer" data-col="12"></span></th>
+        <th class="sortable" data-sort="quero">Quero R$<span class="col-resizer" data-col="13"></span></th>
+        <th class="sortable" data-sort="falta">Falta R$<span class="col-resizer" data-col="14"></span></th>
+        <th class="sortable" data-sort="decisao">Ação<span class="col-resizer" data-col="15"></span></th>
+        <th class="sortable" data-sort="qtd_cotas">Cotas p/comprar<span class="col-resizer" data-col="16"></span></th><th></th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -206,6 +223,7 @@
       </tr>
     </tfoot>
   </table>
+  </div>
 </div>
 
 <script>
@@ -216,6 +234,10 @@ const CLASSES_USD = ["Bond", "Cash", "ETF", "REIT", "Stocks"]
 const CLASSE_BRL_TO_USD = {"Renda Fixa":"Bond", "FII":"REIT", "Ação":"Stocks", "ETF":"ETF"};
 const CLASSE_USD_TO_BRL = {"Bond":"Renda Fixa", "REIT":"FII", "Stocks":"Ação", "ETF":"ETF"};
 function classesAtuais(){ return ["", ...(MOEDA==='USD'?CLASSES_USD:CLASSES_BRL)]; }
+// classes negociadas em unidades inteiras (ação/cota) — o resto (Renda Fixa, Cripto, Bond,
+// Cash) pode ter fração, então a Qtd. aceita casas decimais só pra essas
+const CLASSES_INTEIRAS = new Set(["Ação","BDR","ETF","FII","FII Infra","Stocks","REIT"]);
+function classeInteira(classe){ return CLASSES_INTEIRAS.has(classe); }
 const SEGMENTOS = ["", "Agrícola", "Bancos", "Celulose", "Construtora", "Elétrica",
   "Fdo. de Inv.", "Financeira", "Fundo de Fundos", "Híbrido", "Imóveis", "Lajes Corp.",
   "Logística", "Mineração", "Outro", "Papel", "Petróleo", "Renda Fixa", "Saneamento",
@@ -374,8 +396,8 @@ function renderRows(){
       <td><input type="text" class="vpa-inp" value="${a.vpa?BRL(a.vpa):''}" placeholder="—" ${dis} onfocus="this.select()" onchange="updVpa(${a.id},this.value)"></td>
       <td class="muted">${a.pvp?NUM(a.pvp):'—'}</td>
       <td class="muted">${a.dy?NUM(a.dy)+'%':'—'}</td>
-      <td><input type="number" step="0.0001" value="${a.num_acoes||''}" ${dis} onchange="upd(${a.id},'num_acoes',this.value)"></td>
-      <td><input type="number" step="0.01" value="${a.preco_medio||''}" ${dis} onchange="upd(${a.id},'preco_medio',this.value)"></td>
+      <td><input type="number" step="${classeInteira(a.classe)?'1':'0.0001'}" min="0" value="${a.num_acoes||''}" ${dis} onchange="atualizarQtd(${a.id},this,'${a.classe||''}')"></td>
+      <td><input type="number" step="0.01" value="${a.preco_medio||''}" ${dis} onchange="atualizarPrecoMedio(${a.id},this)"></td>
       <td class="${a.rentabilidade>=0?'pos':'neg'}">${NUM(a.rentabilidade)}%</td>
       <td><select ${dis} onchange="upd(${a.id},'classe',this.value)" data-classe></select></td>
       <td><select ${dis} onchange="upd(${a.id},'segmento',this.value)" data-seg></select></td>
@@ -408,6 +430,20 @@ function upd(id, field, value){
     body: JSON.stringify({[field]: value})})
     .catch(()=>console.error('Falha ao salvar', field, id));
   agendarSincronizacao();
+}
+// Qtd.: ações/BDR/ETF/FII andam de 1 em 1 (não existe meia cota na bolsa); o resto (Renda
+// Fixa, Cripto etc.) aceita até 4 casas decimais. Nunca negativo, nos dois casos.
+function atualizarQtd(id, inputEl, classe){
+  let num = Math.max(0, smartNum(inputEl.value));
+  num = classeInteira(classe) ? Math.round(num) : Math.round(num*10000)/10000;
+  inputEl.value = num || '';
+  upd(id, 'num_acoes', num);
+}
+// Preço Médio: sempre 2 casas, igual ao formato da coluna Preço — independe da classe
+function atualizarPrecoMedio(id, inputEl){
+  const num = Math.round(smartNum(inputEl.value)*100)/100;
+  inputEl.value = num || '';
+  upd(id, 'preco_medio', num);
 }
 async function definirPrecoManual(id){
   // ao contrário do upd() otimista, espera confirmar e recarrega na hora — senão o botão
@@ -586,6 +622,46 @@ document.querySelectorAll('th.sortable').forEach(th=>
   th.addEventListener('click', ()=> setSort(th.dataset.sort)));
 document.getElementById('btnTema').textContent =
   document.documentElement.getAttribute('data-theme')==='light' ? '☀️' : '🌙';
+
+// larguras de coluna arrastáveis — pega o <col> correspondente no <colgroup> (não a célula
+// em si) porque é o <col> que controla a largura da coluna inteira com table-layout:fixed
+function initResizableColumns(){
+  const tabela = document.getElementById('tabelaAtivos');
+  const cols = tabela.querySelectorAll('colgroup col');
+  const CHAVE = 'largurasColunasRebalanceamento';
+  let salvas = {};
+  try{ salvas = JSON.parse(localStorage.getItem(CHAVE) || '{}'); } catch(e){}
+  cols.forEach((col,i)=>{ if(salvas[i]) col.style.width = salvas[i]+'px'; });
+
+  tabela.querySelectorAll('.col-resizer').forEach(handle=>{
+    const i = parseInt(handle.dataset.col);
+    const col = cols[i];
+    handle.addEventListener('click', e=> e.stopPropagation());
+    handle.addEventListener('mousedown', e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startWidth = handle.closest('th').getBoundingClientRect().width;
+      handle.classList.add('resizing');
+      function onMove(ev){
+        col.style.width = Math.max(36, startWidth + (ev.clientX - startX)) + 'px';
+      }
+      function onUp(){
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        handle.classList.remove('resizing');
+        let largs = {};
+        try{ largs = JSON.parse(localStorage.getItem(CHAVE) || '{}'); } catch(e){}
+        largs[i] = parseInt(col.style.width);
+        localStorage.setItem(CHAVE, JSON.stringify(largs));
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
+initResizableColumns();
+
 carregarCarteiras();
 </script>
 </body>

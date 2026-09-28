@@ -136,6 +136,7 @@
           <th>Dividendo mensal (méd. 12m)</th>
           <th>Número mágico</th>
           <th>Faltam</th>
+          <th>Investir hoje</th>
           <th></th>
         </tr></thead>
         <tbody id="tbodyMagico"></tbody>
@@ -196,13 +197,16 @@ function render(){
   const ativos = DATA.ativos || [];
   const tb = document.getElementById('tbodyMagico');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum FII encontrado nessa carteira. Classifique o ativo como "FII" ou "FII Infra" na aba Rebalanceamento pra ele aparecer aqui.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="9">Nenhum FII encontrado nessa carteira. Classifique o ativo como "FII" ou "FII Infra" na aba Rebalanceamento pra ele aparecer aqui.</td></tr>`;
     return;
   }
   tb.innerHTML = ativos.map(a=>{
     const divMensal = a.dividendos_12m!=null ? a.dividendos_12m/12 : null;
     const nm = numeroMagico(a.preco, divMensal);
+    // faltam já vem sem passar de 0 (Math.max) — por isso investirHoje nunca fica negativo
+    // quando o ativo já bateu o número mágico (o "excedente" não é um valor a investir)
     const faltam = nm!=null ? Math.max(0, nm - (a.num_acoes||0)) : null;
+    const investirHoje = faltam!=null ? faltam * (a.preco||0) : null;
     let badge = `<span class="badge sem-dados">busque o dividendo</span>`;
     if(nm!=null){
       badge = faltam<=0 ? `<span class="badge ok">✓ já bate</span>` : `<span class="badge falta">faltam ${faltam}</span>`;
@@ -215,6 +219,7 @@ function render(){
       <td>${divMensal!=null?BRL(divMensal):'—'}</td>
       <td>${nm!=null?nm.toLocaleString('pt-BR'):'—'}</td>
       <td>${faltam!=null?faltam.toLocaleString('pt-BR'):'—'}</td>
+      <td>${investirHoje!=null?BRL(investirHoje):'—'}</td>
       <td class="acoes-cell">
         ${badge}
         <button class="mini ghost" title="Busca o dividendo dos últimos 12 meses no Investidor10"

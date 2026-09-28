@@ -194,7 +194,8 @@
           <th class="grp-fluxo">Teto Fluxo Desc.</th><th class="grp-cresc5">Teto Cresc. Hist.</th>
           <th class="grp-graham">Teto Graham</th>
           <th class="grp-patrimonial">Teto Patrim.</th>
-          <th>Melhor teto</th><th>Distância</th><th></th>
+          <th class="sortable" onclick="ordenarResumo('melhor')">Melhor teto <span class="arr" id="arrMelhor"></span></th>
+          <th class="sortable" onclick="ordenarResumo('dist')">Distância <span class="arr" id="arrDist"></span></th><th></th>
         </tr></thead>
         <tbody id="tbodyResumo"></tbody>
       </table>
@@ -418,24 +419,48 @@ function renderResumo(){
 
   const classeFiltro = document.getElementById('filtroClasse').value;
   if(classeFiltro) ativos = ativos.filter(a=>a.classe===classeFiltro);
-  ativos = ativos.slice().sort((a,b)=>{
-    const va = (a[SORT_RESUMO.campo]||'').toString().toLowerCase();
-    const vb = (b[SORT_RESUMO.campo]||'').toString().toLowerCase();
-    return va.localeCompare(vb,'pt-BR') * SORT_RESUMO.dir;
-  });
-  document.getElementById('arrTicker').textContent = SORT_RESUMO.campo==='ticker' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
-  document.getElementById('arrClasse').textContent = SORT_RESUMO.campo==='classe' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
 
-  const tb = document.getElementById('tbodyResumo');
-  if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhum ativo encontrado.</td></tr>`;
-    return;
-  }
-  tb.innerHTML = ativos.map(a=>{
+  // calcula os tetos ANTES de ordenar (não só na hora de desenhar a linha), porque agora dá
+  // pra ordenar por "melhor teto" e "distância" também, que são valores calculados — não
+  // existem prontos no objeto do ativo como ticker/classe/preço
+  const enriquecidos = ativos.map(a=>{
     const t = tetosDoAtivo(a);
     const tetos = Object.values(t).filter(v=>v!=null);
     const melhor = tetos.length ? Math.min(...tetos) : null;
     const dist = distancia(melhor, a.preco);
+    return {...a, _tetos:t, _melhor:melhor, _dist:dist};
+  });
+
+  const CAMPOS_TEXTO = new Set(['ticker','classe']);
+  enriquecidos.sort((a,b)=>{
+    const campo = SORT_RESUMO.campo;
+    if(CAMPOS_TEXTO.has(campo)){
+      const va = (a[campo]||'').toString().toLowerCase();
+      const vb = (b[campo]||'').toString().toLowerCase();
+      return va.localeCompare(vb,'pt-BR') * SORT_RESUMO.dir;
+    }
+    const chave = campo==='melhor' ? '_melhor' : campo==='dist' ? '_dist' : campo;
+    const va = a[chave], vb = b[chave];
+    // sem dado sempre vai pro final da lista, nas duas direções — não faz sentido misturar
+    // "—" no meio de uma ordenação de maior/menor
+    if(va==null && vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    return (va-vb) * SORT_RESUMO.dir;
+  });
+
+  document.getElementById('arrTicker').textContent = SORT_RESUMO.campo==='ticker' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
+  document.getElementById('arrClasse').textContent = SORT_RESUMO.campo==='classe' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
+  document.getElementById('arrMelhor').textContent = SORT_RESUMO.campo==='melhor' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
+  document.getElementById('arrDist').textContent = SORT_RESUMO.campo==='dist' ? (SORT_RESUMO.dir>0?'▲':'▼') : '';
+
+  const tb = document.getElementById('tbodyResumo');
+  if(!enriquecidos.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhum ativo encontrado.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = enriquecidos.map(a=>{
+    const t = a._tetos, melhor = a._melhor, dist = a._dist;
     return `<tr class="${ATIVO_EDITANDO===a.id?'linha-editando':''}">
       <td class="ativo-cell">${a.ticker}</td>
       <td class="muted">${a.classe||'—'}</td>

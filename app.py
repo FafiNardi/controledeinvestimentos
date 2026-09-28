@@ -415,6 +415,10 @@ def fetch_investidor10(ticker: str) -> dict:
                 mpvp = re.search(r'"_card vp".*?<span>([\d.,]+)</span>', html, re.S)
                 if mpvp:
                     out["pvp"] = parse_num_br(mpvp.group(1))
+            # FII não tem o atributo data-indicator="VPA" (só ações têm) — mas dá pra
+            # derivar de volta: P/VP = preço ÷ VPA, então VPA = preço ÷ P/VP
+            if out["vpa"] is None and out["pvp"]:
+                out["vpa"] = round(out["preco"] / out["pvp"], 4)
             if out["dy"] is None:
                 mdy = re.search(r'"_card dy".*?<span>([\d.,]+)%</span>', html, re.S)
                 if mdy:
@@ -1316,7 +1320,7 @@ def api_darf_desmarcar(did):
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #
 
-METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5", "graham"}
+METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5", "graham", "patrimonial"}
 
 
 @app.route("/numero-magico")

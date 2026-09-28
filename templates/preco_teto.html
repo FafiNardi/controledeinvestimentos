@@ -11,12 +11,14 @@
     --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
     --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
     --green:#34d399; --red:#f87171; --amber:#f5b754; --gold:#eab308; --purple:#c084fc;
+    --cyan:#22d3ee;
     --page-a:var(--green); --page-b:var(--gold); --tab-txt-on:#04211d;
   }
   html[data-theme="light"]{
     --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
     --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
     --green:#16a34a; --red:#dc2626; --amber:#b45309; --gold:#a16207; --purple:#9333ea;
+    --cyan:#0e7490;
     --tab-txt-on:#fff;
   }
   *{box-sizing:border-box}
@@ -80,6 +82,7 @@
      text-transform:uppercase;letter-spacing:.04em}
   th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)} th.grp-fluxo{color:var(--blue)}
   th.grp-cresc5{color:var(--red)} th.grp-graham{color:var(--purple)}
+  th.grp-patrimonial{color:var(--cyan)}
   td:first-child,th:first-child{text-align:left}
   tbody tr:last-child td{border-bottom:0}
   tr:hover td{background:var(--panel2)}
@@ -101,6 +104,7 @@
   .view-tab[data-metodo="fluxo_descontado"].on{background:var(--blue)}
   .view-tab[data-metodo="cresc5"].on{background:var(--red)}
   .view-tab[data-metodo="graham"].on{background:var(--purple)}
+  .view-tab[data-metodo="patrimonial"].on{background:var(--cyan)}
   .resumo-teto{font-weight:700}
   .resumo-teto.melhor{text-decoration:underline;text-underline-offset:3px}
   tr.linha-editando td{background:rgba(91,141,239,.1)}
@@ -189,6 +193,7 @@
           <th class="grp-bazin">Teto Bazin</th><th class="grp-barsi">Teto Barsi</th>
           <th class="grp-fluxo">Teto Fluxo Desc.</th><th class="grp-cresc5">Teto Cresc. Hist.</th>
           <th class="grp-graham">Teto Graham</th>
+          <th class="grp-patrimonial">Teto Patrim.</th>
           <th>Melhor teto</th><th>Distância</th><th></th>
         </tr></thead>
         <tbody id="tbodyResumo"></tbody>
@@ -319,6 +324,17 @@ function tetoGraham(dados){
   const margem = dados.margem_seguranca || 0;
   return precoJusto * (1 - margem/100);
 }
+// Teto Patrimonial (disciplina clássica de FII de tijolo): nunca pagar ágio sobre o
+// patrimônio da cota, porque o VPA de um FII de tijolo já reflete o laudo de avaliação dos
+// imóveis — pagar acima disso é apostar que o mercado vale mais que os imóveis avaliados.
+// Fator de ágio máximo editável (padrão 1,0x = nunca pagar acima do patrimônio; um FII de
+// papel/recebíveis com boa gestão às vezes justifica um fator um pouco acima de 1).
+function tetoPatrimonial(dados){
+  const vpa = dados.vpa || 0;
+  if(vpa <= 0) return null;
+  const fatorAgio = dados.fator_agio != null ? dados.fator_agio : 1;
+  return vpa * fatorAgio;
+}
 function distancia(teto, precoAtual){
   if(teto==null || !precoAtual) return null;
   return (teto - precoAtual) / precoAtual * 100;
@@ -330,6 +346,7 @@ const METODOS_INFO = {
   fluxo_descontado: {nome:'Fluxo Descontado', cor:'blue', desc:'Projeta o lucro (ações) ou dividendo (FIIs) um ano à frente com o crescimento esperado, e desconta pela diferença entre o retorno mínimo exigido (IPCA + juro real de um título longo) e o crescimento na perpetuidade.'},
   cresc5: {nome:'Crescimento Histórico', cor:'red', desc:'Projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro dos últimos 5 anos, e acha o preço que faria esse dividendo render o yield mínimo. O crescimento do ROE e a consistência de dividendos aparecem só como informação de qualidade.'},
   graham: {nome:'Graham', cor:'purple', desc:'Preço justo de Benjamin Graham: raiz quadrada de 22,5 × LPA × VPA (15x lucro, 1,5x patrimônio — os limites máximos que Graham aceitava pagar). Só funciona com lucro e patrimônio líquido positivos.'},
+  patrimonial: {nome:'Teto Patrimonial', cor:'cyan', desc:'Pensado pra FII de tijolo: nunca pagar ágio sobre o valor patrimonial da cota (o VPA já reflete o laudo de avaliação dos imóveis). Teto = VPA × fator de ágio máximo (padrão 1,0x).'},
 };
 let ATIVO_EDITANDO = null;   // id do asset selecionado no editor
 let METODO_EDITANDO = 'bazin';
@@ -380,6 +397,7 @@ function tetosDoAtivo(a){
     fluxo_descontado: tetoFluxoDescontado(a.premissas.fluxo_descontado||{}),
     cresc5: tetoCrescimentoHistorico(a.premissas.cresc5||{}),
     graham: tetoGraham(a.premissas.graham||{}),
+    patrimonial: tetoPatrimonial(a.premissas.patrimonial||{}),
   };
 }
 
@@ -410,7 +428,7 @@ function renderResumo(){
 
   const tb = document.getElementById('tbodyResumo');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum ativo encontrado.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhum ativo encontrado.</td></tr>`;
     return;
   }
   tb.innerHTML = ativos.map(a=>{
@@ -427,6 +445,7 @@ function renderResumo(){
       <td class="grp-fluxo">${t.fluxo_descontado==null?'—':BRL(t.fluxo_descontado)}</td>
       <td class="grp-cresc5">${t.cresc5==null?'—':BRL(t.cresc5)}</td>
       <td class="grp-graham">${t.graham==null?'—':BRL(t.graham)}</td>
+      <td class="grp-patrimonial">${t.patrimonial==null?'—':BRL(t.patrimonial)}</td>
       <td class="resumo-teto melhor">${melhor==null?'—':BRL(melhor)}</td>
       <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
       <td class="acoes-cell">
@@ -557,9 +576,14 @@ function renderEditor(){
         <span class="hint">Valor patrimonial por ação (patrimônio líquido ÷ nº de ações)</span></div>
       <div class="editor-field"><label>Margem segur.<span class="ajuda" title="Desconto sobre o preço justo, pra folga extra">?</span></label>${inputPremissa(a.id,'graham','margem_seguranca',d.margem_seguranca!=null?d.margem_seguranca:0,dis)}
         <span class="hint">Desconto sobre o preço justo calculado — padrão 0% (fórmula original)</span></div>`,
+    patrimonial: ()=>`
+      <div class="editor-field"><label>VPA<span class="ajuda" title="Valor Patrimonial por Cota">?</span></label>${inputPremissa(a.id,'patrimonial','vpa',d.vpa,dis)}
+        <span class="hint">Valor patrimonial por cota (patrimônio do fundo ÷ nº de cotas)</span></div>
+      <div class="editor-field"><label>Fator ágio máx.<span class="ajuda" title="Múltiplo do VPA que você aceita pagar — 1,0 = nunca pagar acima do patrimônio">?</span></label>${inputPremissa(a.id,'patrimonial','fator_agio',d.fator_agio!=null?d.fator_agio:1,dis)}
+        <span class="hint">Múltiplo do VPA que você aceita pagar — padrão 1,0 (nunca acima do patrimônio)</span></div>`,
   };
 
-  const funcTeto = {bazin:tetoBazin, barsi:tetoBarsi, fluxo_descontado:tetoFluxoDescontado, cresc5:tetoCrescimentoHistorico, graham:tetoGraham}[METODO_EDITANDO];
+  const funcTeto = {bazin:tetoBazin, barsi:tetoBarsi, fluxo_descontado:tetoFluxoDescontado, cresc5:tetoCrescimentoHistorico, graham:tetoGraham, patrimonial:tetoPatrimonial}[METODO_EDITANDO];
   const teto = funcTeto(d);
   const dist = distancia(teto, a.preco);
 
@@ -653,6 +677,13 @@ async function buscarDadosInvestidor10(assetId, ticker){
       a.premissas.graham = graham;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:assetId, metodo:'graham', dados:graham})});
+    }
+    // Teto Patrimonial usa só o VPA — mesmo dado que o Graham já buscou
+    if(d.vpa){
+      const patrimonial = {...(a.premissas.patrimonial||{}), vpa:d.vpa||0};
+      a.premissas.patrimonial = patrimonial;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:assetId, metodo:'patrimonial', dados:patrimonial})});
     }
     if(d.preco){
       await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},

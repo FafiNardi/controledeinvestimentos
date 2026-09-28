@@ -100,6 +100,10 @@
   .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
           box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
   .tbl-scroll{overflow-x:auto}
+  /* cabeçalho gruda no topo da própria caixa de rolagem — a lista tem um teto de altura
+     (~15 linhas) e rola por dentro dela mesma em vez de esticar a página inteira */
+  .tbl-scroll.limitado{max-height:min(560px,62vh);overflow-y:auto}
+  .tbl-scroll.limitado thead th{position:sticky;top:0;z-index:2}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
@@ -157,7 +161,28 @@
     </div>
   </div>
 
+  <div class="group-label">Dividend Yield das opções (prêmio ÷ valor investido na ação)</div>
+  <p class="muted" style="font-size:12px;max-width:820px;margin:0 0 4px">
+    Quanto o prêmio recebido vendendo opções desse ativo representa sobre o que você tem
+    investido nele (quantidade × preço médio, vindo do Rebalanceamento). Só entra ativo
+    classificado como <b>Ação</b> — não faz sentido comparar prêmio de opção com valor
+    investido em Renda Fixa, FII etc.
+  </p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th><th>Prêmio recebido</th><th>Valor investido</th><th>DY (opções)</th>
+        </tr></thead>
+        <tbody id="tbodyDY"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="group-label">Operações em aberto</div>
+  <div class="addbar" id="addbar">
+    <button onclick="novaOperacao()">+ Nova operação</button>
+  </div>
   <div id="abertasVazio" class="muted" style="padding:10px 0">Nenhuma operação em aberto no momento.</div>
   <div class="ledger" id="abertasBox" style="display:none">
     <div class="tbl-scroll">
@@ -191,13 +216,10 @@
         <option value="recomprada">Recomprada</option>
       </select>
     </label>
-    <div class="addbar" style="flex:1;margin:0" id="addbar">
-      <button onclick="novaOperacao()">+ Nova operação</button>
-    </div>
   </div>
 
   <div class="ledger">
-    <div class="tbl-scroll">
+    <div class="tbl-scroll limitado">
       <table>
         <thead><tr>
           <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
@@ -365,6 +387,7 @@ function renderTudo(){
   renderStats();
   renderGraficoMes();
   renderRanking();
+  renderDY();
   renderAbertas();
   renderTabela();
   renderIR();
@@ -472,6 +495,12 @@ function renderStats(){
   const anualizados = fechadas.map(retornoAnualizado).filter(v=>v!=null);
   const mediaAnualizada = anualizados.length ? anualizados.reduce((a,b)=>a+b,0)/anualizados.length : null;
   const porTipo = t => ops.filter(o=>o.tipo===t).reduce((s,o)=>s+premioTotal(o),0);
+  // DY geral: todo prêmio recebido (de qualquer ativo) ÷ só o valor investido em Ações —
+  // Renda Fixa/FII/etc não entram no denominador, senão o DY fica artificialmente diluído
+  // por dinheiro que nunca teve opção nenhuma vendida em cima
+  const valorEmAcoes = (DATA.ativos||[]).filter(a=>a.classe==='Ação')
+    .reduce((s,a)=>s+(a.valor_investido||0), 0);
+  const dyGeral = valorEmAcoes ? totalPremio/valorEmAcoes*100 : null;
 
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Prêmio recebido (total)</div><div class="v">${BRL(totalPremio)}</div>
@@ -484,6 +513,9 @@ function renderStats(){
     <div class="stat"><div class="k">Taxa de "ficou com o prêmio"</div>
       <div class="v">${taxaSucesso==null?'—':PCT(taxaSucesso)}</div>
       <div class="sub">não foi exercida (pó ou recompra)</div></div>
+    <div class="stat"><div class="k">DY das opções (sobre ações)</div>
+      <div class="v ${dyGeral>=0?'pos':''}">${dyGeral==null?'—':PCT(dyGeral)}</div>
+      <div class="sub">prêmio total ÷ valor investido em Ações (${BRL(valorEmAcoes)})</div></div>
     <div class="stat"><div class="k">Retorno médio anualizado</div>
       <div class="v ${mediaAnualizada>=0?'pos':'neg'}">${mediaAnualizada==null?'—':PCT(mediaAnualizada)}</div>
       <div class="sub">sobre o capital de referência (strike × qtde)</div></div>
@@ -530,6 +562,39 @@ function renderRanking(){
       </div>
       <div class="rank-bar-wrap"><div class="rank-bar" style="width:${max?v.premio/max*100:0}%"></div></div>
     </div>`).join('') : '<div class="muted" style="padding:10px 0">Nenhuma operação lançada ainda.</div>';
+}
+
+function renderDY(){
+  const ops = DATA.operacoes||[];
+  const porAtivo = {};
+  ops.forEach(o=>{
+    if(!o.ativo) return;
+    porAtivo[o.ativo] = (porAtivo[o.ativo]||0) + premioTotal(o);
+  });
+  // só considera valor investido em ativos classificados como Ação — o mesmo critério do
+  // DY geral lá em cima, aqui aplicado ativo por ativo
+  const investidoPorAtivo = {};
+  (DATA.ativos||[]).forEach(a=>{
+    if(a.classe==='Ação') investidoPorAtivo[a.ticker] = a.valor_investido||0;
+  });
+  const tickers = [...new Set([...Object.keys(porAtivo), ...Object.keys(investidoPorAtivo)])]
+    .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const tb = document.getElementById('tbodyDY');
+  if(!tickers.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="4">Nenhum ativo com opção lançada ou classificado como Ação ainda.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = tickers.map(t=>{
+    const premio = porAtivo[t] || 0;
+    const investido = investidoPorAtivo[t];
+    const dy = (investido!=null && investido>0) ? premio/investido*100 : null;
+    return `<tr>
+      <td class="ativo-cell">${t}</td>
+      <td>${BRL(premio)}</td>
+      <td>${investido!=null ? BRL(investido) : '<span class="muted" title="Ativo não classificado como Ação no Rebalanceamento, ou sem quantidade/preço médio preenchido">—</span>'}</td>
+      <td>${dy!=null ? `<b class="${dy>=0?'pos':''}">${PCT(dy)}</b>` : '—'}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderAbertas(){
@@ -648,7 +713,7 @@ async function editarCampo(id, campo, valor){
   if(o){
     o[campo] = valorNum;
     popularFiltros();
-    renderStats(); renderGraficoMes(); renderRanking(); renderAbertas(); renderTabela(); renderIR();
+    renderStats(); renderGraficoMes(); renderRanking(); renderDY(); renderAbertas(); renderTabela(); renderIR();
   }
 }
 

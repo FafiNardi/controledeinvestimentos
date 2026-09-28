@@ -1220,9 +1220,15 @@ def api_opcoes(cid):
     darfs = DarfPagamento.query.filter_by(carteira_id=cid).all()
     darfs_out = [{"id": d.id, "mes": d.mes, "regime": d.regime,
                   "data_pagamento": d.data_pagamento or "", "valor_pago": d.valor_pago or 0} for d in darfs]
+    # valor investido por ativo (num_ações × preço médio) do Rebalanceamento — pro relatório
+    # de "dividend yield" das opções (prêmio recebido ÷ capital investido na ação)
+    assets = Asset.query.filter_by(carteira_id=cid).all()
+    ativos_out = [{"ticker": a.ticker, "classe": a.classe or "",
+                   "valor_investido": (a.num_acoes or 0) * (a.preco_medio or 0)} for a in assets]
     return jsonify({
         "operacoes": out,
         "darfs": darfs_out,
+        "ativos": ativos_out,
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
         "editavel": c.user_id == current_user.id,
     })

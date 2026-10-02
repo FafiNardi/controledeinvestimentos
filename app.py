@@ -23,6 +23,7 @@ import yfinance as yf
 from flask import (Flask, jsonify, request, render_template, redirect,
                    url_for, flash, abort)
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 from flask_login import (LoginManager, UserMixin, login_user, logout_user,
                          login_required, current_user)
@@ -54,8 +55,27 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # sozinho se precisar; pool_recycle descarta conexões paradas há mais de 4 min,
 # antes do Neon suspendê-las por conta própria.
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 240}
+# Sem tempo limite nenhum, uma conexão ou consulta travada no Postgres prendia o processo
+# inteiro pra sempre — foi o que aconteceu no incidente de 02/10/2026 (gunicorn subia,
+# ficava escutando na porta, e nunca respondia nada; o banco em si estava saudável, mas
+# sem conseguir provar isso rápido o jeito foi reiniciar o serviço manualmente). connect_timeout
+# cobre a conexão em si; statement_timeout (logo abaixo, via evento "connect") cobre cada
+# consulta individual — os dois juntos garantem que, se isso se repetir, o processo falha
+# rápido com um erro visível em vez de ficar pendurado pra sempre.
+if db_url.startswith("postgresql"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"]["connect_args"] = {"connect_timeout": 10}
 
 db = SQLAlchemy(app)
+if db_url.startswith("postgresql"):
+    # statement_timeout não pode ir como parâmetro de conexão (connect_args) — o endpoint
+    # "-pooler" do Neon (PgBouncer) rejeita com "unsupported startup parameter". Setar via
+    # SET logo após abrir a conexão funciona normalmente. db.engine só existe dentro de um
+    # contexto de aplicação no Flask-SQLAlchemy 3.x, por isso o "with" aqui.
+    with app.app_context():
+        @event.listens_for(db.engine, "connect")
+        def _definir_statement_timeout(conexao_dbapi, _registro_conexao):
+            with conexao_dbapi.cursor() as cur:
+                cur.execute("SET statement_timeout = 30000")  # ms — teto por consulta
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 

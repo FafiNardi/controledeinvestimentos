@@ -850,29 +850,34 @@ def api_delete_asset(aid):
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
-    """Busca a cotação de cada ativo em paralelo (até 8 de cada vez) — com carteiras grandes
-    (40-50+ ativos), buscar um por um a ~1s cada facilmente passava dos 30s de timeout padrão
-    do gunicorn, que mata o processo ANTES do commit no fim do loop rodar: a atualização
-    inteira sumia sem erro nenhum pro usuário.
+    """Busca a cotação de cada ativo em paralelo (até 24 de cada vez) — com carteiras grandes
+    (40-50+ ativos), buscar um por um a ~1-2s cada facilmente passava não só dos 90s do nosso
+    próprio gunicorn (Procfile), como também dos ~30s de timeout do PRÓPRIO PROXY da Render —
+    esse é mais curto e a gente não controla, então o jeito é garantir que o total termine bem
+    antes disso. 24 workers (é I/O esperando rede, não CPU — Render free tier aguenta numa boa)
+    com 50 ativos reais ficou em ~15s no teste; com 8 workers passava dos 30s e a Render cortava
+    a conexão com 502 antes do commit no fim do loop rodar — a atualização inteira sumia sem
+    erro nenhum pro usuário.
 
     As threads do pool só fazem a parte de rede (fetch_quote com ticker/moeda, sem tocar em
     nenhum objeto do banco) — passar um Asset do SQLAlchemy pra dentro de uma thread quebra,
     porque a sessão do Flask-SQLAlchemy é presa ao contexto da aplicação, que essas threads não
-    têm. A escrita no banco acontece depois, de volta na thread principal, com os resultados
-    já prontos."""
+    têm. A escrita no banco acontece depois, de volta na thread principal, com os resultados já
+    prontos — e em lotes de 15 (não um commit só no final), pra sobrar o que já deu tempo de
+    buscar mesmo se a Render ainda assim cortar a conexão no meio."""
     c = get_carteira_or_404(cid)
     require_owner(c)  # carteira agora é privada: só o dono mexe (antes qualquer logado podia)
     assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
     moeda = c.moeda or "BRL"
 
     respostas = {}
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=24) as ex:
         futuros = {ex.submit(fetch_quote, a.ticker, moeda): a.id for a in assets}
         for fut in as_completed(futuros):
             respostas[futuros[fut]] = fut.result()
 
     resultados = []
-    for a in assets:
+    for i, a in enumerate(assets, start=1):
         q = respostas[a.id]
         if q["preco"]:
             a.preco = q["preco"]
@@ -881,6 +886,8 @@ def api_refresh(cid):
             a.dy = q["dy"] or 0
             a.updated_at = datetime.now().isoformat(timespec="seconds")
         resultados.append({"ticker": a.ticker, **q})
+        if i % 15 == 0:
+            db.session.commit()
     db.session.commit()
     return jsonify({"ok": True, "resultados": resultados})
 

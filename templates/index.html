@@ -621,25 +621,32 @@ async function refresh(){
   for(let i=0;i<ids.length;i+=TAMANHO_LOTE) lotes.push(ids.slice(i,i+TAMANHO_LOTE));
   if(lotes.length===0) lotes.push([]);  // carteira vazia — ainda faz 1 chamada (comportamento antigo)
 
-  let falhou = false;
+  // Um lote falhar (502 passageiro, por exemplo) não pode travar os demais — antes um
+  // "break" aqui parava tudo no meio, deixando os lotes seguintes sem nem ser tentados
+  // (sintoma relatado: "funcionou pra alguns ativos, não pra todos"). Cada lote agora
+  // tem 1 nova tentativa automática antes de desistir dele, e os outros lotes continuam
+  // rodando mesmo se um deles falhar de vez.
+  let lotesComFalha = 0;
   for(let i=0;i<lotes.length;i++){
     if(lotes.length>1) st.innerHTML=`<span class="spin">⟳</span> atualizando lote ${i+1}/${lotes.length}...`;
     else st.innerHTML='<span class="spin">⟳</span> atualizando...';
-    try{
-      const r = await fetch('/api/carteira/'+CID+'/refresh',{method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: lotes[i]})});
-      // fetch só rejeita em falha de rede — um 502/504 chega aqui como resposta "normal" e
-      // passava batido, mostrando "atualizado" mesmo quando nada foi atualizado de verdade.
-      if(!r.ok) throw new Error('HTTP '+r.status);
-    }catch(e){
-      falhou = true;
-      break;
+    let ok = false;
+    for(let tentativa=0; tentativa<2 && !ok; tentativa++){
+      try{
+        const r = await fetch('/api/carteira/'+CID+'/refresh',{method:'POST',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: lotes[i]})});
+        // fetch só rejeita em falha de rede — um 502/504 chega aqui como resposta "normal" e
+        // passava batido, mostrando "atualizado" mesmo quando nada foi atualizado de verdade.
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        ok = true;
+      }catch(e){ /* tenta de novo (até o limite acima) */ }
     }
+    if(!ok) lotesComFalha++;
   }
   b.disabled=false;
-  if(falhou){
-    st.innerHTML='<span style="color:var(--red)">⚠ falhou ao atualizar, tente de novo</span>';
-    setTimeout(()=>{ if(st.textContent.includes('falhou')) st.textContent=''; }, 6000);
+  if(lotesComFalha>0){
+    st.innerHTML=`<span style="color:var(--red)">⚠ ${lotesComFalha} de ${lotes.length} lote(s) falharam, tente de novo</span>`;
+    setTimeout(()=>{ if(st.textContent.includes('falh')) st.textContent=''; }, 7000);
   }else{
     st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
   }

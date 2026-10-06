@@ -610,9 +610,39 @@ async function copiarDaRentabilidade(){
 async function refresh(){
   if(!CID) return;
   const b=document.getElementById('btnRefresh'), st=document.getElementById('status');
-  b.disabled=true; st.innerHTML='<span class="spin">⟳</span> atualizando...';
-  await fetch('/api/carteira/'+CID+'/refresh',{method:'POST'});
-  b.disabled=false; st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
+  b.disabled=true;
+  // O proxy da Render (não o nosso servidor) corta a conexão com 502 perto de ~30s, e
+  // carteiras com 35+ ativos reais já bateram nisso mesmo com busca em paralelo — o jeito
+  // é o PRÓPRIO NAVEGADOR dividir em lotes pequenos e chamar o endpoint uma vez por lote,
+  // cada chamada curta o bastante pra nunca chegar perto do limite deles.
+  const TAMANHO_LOTE = 20;
+  const ids = (STATE.assets||[]).filter(a=>!a.manual).map(a=>a.id);
+  const lotes = [];
+  for(let i=0;i<ids.length;i+=TAMANHO_LOTE) lotes.push(ids.slice(i,i+TAMANHO_LOTE));
+  if(lotes.length===0) lotes.push([]);  // carteira vazia — ainda faz 1 chamada (comportamento antigo)
+
+  let falhou = false;
+  for(let i=0;i<lotes.length;i++){
+    if(lotes.length>1) st.innerHTML=`<span class="spin">⟳</span> atualizando lote ${i+1}/${lotes.length}...`;
+    else st.innerHTML='<span class="spin">⟳</span> atualizando...';
+    try{
+      const r = await fetch('/api/carteira/'+CID+'/refresh',{method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: lotes[i]})});
+      // fetch só rejeita em falha de rede — um 502/504 chega aqui como resposta "normal" e
+      // passava batido, mostrando "atualizado" mesmo quando nada foi atualizado de verdade.
+      if(!r.ok) throw new Error('HTTP '+r.status);
+    }catch(e){
+      falhou = true;
+      break;
+    }
+  }
+  b.disabled=false;
+  if(falhou){
+    st.innerHTML='<span style="color:var(--red)">⚠ falhou ao atualizar, tente de novo</span>';
+    setTimeout(()=>{ if(st.textContent.includes('falhou')) st.textContent=''; }, 6000);
+  }else{
+    st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
+  }
   await load();
 }
 

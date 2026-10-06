@@ -850,24 +850,28 @@ def api_delete_asset(aid):
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
-    """Busca a cotação de cada ativo em paralelo (até 24 de cada vez) — com carteiras grandes
-    (40-50+ ativos), buscar um por um a ~1-2s cada facilmente passava não só dos 90s do nosso
-    próprio gunicorn (Procfile), como também dos ~30s de timeout do PRÓPRIO PROXY da Render —
-    esse é mais curto e a gente não controla, então o jeito é garantir que o total termine bem
-    antes disso. 24 workers (é I/O esperando rede, não CPU — Render free tier aguenta numa boa)
-    com 50 ativos reais ficou em ~15s no teste; com 8 workers passava dos 30s e a Render cortava
-    a conexão com 502 antes do commit no fim do loop rodar — a atualização inteira sumia sem
-    erro nenhum pro usuário.
+    """Busca a cotação de cada ativo em paralelo — mesmo com 24 workers (I/O de rede, não CPU),
+    o PRÓPRIO PROXY da Render (não o nosso gunicorn, esse já aguenta 90s) corta a conexão com
+    502 ao redor de ~30s, e testes diretos em produção mostraram que isso ainda acontecia com
+    35+ ativos reais mesmo paralelizando — o plano free da Render parece não entregar paralelismo
+    de verdade, só o gunicorn/CPU compartilhados. Como não dá pra configurar esse timeout (é da
+    infraestrutura deles, não nosso), a defesa é o frontend (ver refresh() em index.html) dividir
+    a carteira em lotes de ~20 ativos e chamar esse endpoint uma vez por lote — cada chamada aqui
+    processa só o "ids" recebido (ou a carteira inteira, se "ids" não vier, pra manter compatível
+    com chamadas antigas/carteiras pequenas).
 
     As threads do pool só fazem a parte de rede (fetch_quote com ticker/moeda, sem tocar em
     nenhum objeto do banco) — passar um Asset do SQLAlchemy pra dentro de uma thread quebra,
     porque a sessão do Flask-SQLAlchemy é presa ao contexto da aplicação, que essas threads não
     têm. A escrita no banco acontece depois, de volta na thread principal, com os resultados já
-    prontos — e em lotes de 15 (não um commit só no final), pra sobrar o que já deu tempo de
-    buscar mesmo se a Render ainda assim cortar a conexão no meio."""
+    prontos."""
     c = get_carteira_or_404(cid)
     require_owner(c)  # carteira agora é privada: só o dono mexe (antes qualquer logado podia)
-    assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    query = Asset.query.filter_by(carteira_id=cid, manual=0)
+    if ids:
+        query = query.filter(Asset.id.in_(ids))
+    assets = query.all()
     moeda = c.moeda or "BRL"
 
     respostas = {}

@@ -199,6 +199,9 @@ class OpcaoOp(db.Model):
     carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
     ativo = db.Column(db.String(40), nullable=False, default="")
     tipo = db.Column(db.String(4), nullable=False, default="PUT")   # PUT ou CALL
+    # direção da operação — o usuário só faz venda coberta (gera o prêmio), mas o campo
+    # existe pra deixar registrado explicitamente e permitir compra de opção também
+    operacao = db.Column(db.String(6), nullable=False, default="venda")  # venda ou compra
     data_abertura = db.Column(db.String(10), default="")     # YYYY-MM-DD
     data_vencimento = db.Column(db.String(10), default="")   # YYYY-MM-DD
     strike = db.Column(db.Float, default=0)
@@ -1241,7 +1244,7 @@ def api_opcoes(cid):
     require_owner(c)
     ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
     out = [{
-        "id": o.id, "ativo": o.ativo, "tipo": o.tipo,
+        "id": o.id, "ativo": o.ativo, "tipo": o.tipo, "operacao": o.operacao or "venda",
         "data_abertura": o.data_abertura, "data_vencimento": o.data_vencimento,
         "strike": o.strike or 0, "quantidade": o.quantidade or 0, "premio": o.premio or 0,
         "status": o.status or "aberta", "data_fechamento": o.data_fechamento or "",
@@ -1274,6 +1277,7 @@ def api_opcoes_add(cid):
     hoje = datetime.now().strftime("%Y-%m-%d")
     o = OpcaoOp(carteira_id=cid, ativo=(d.get("ativo") or "").strip().upper(),
                 tipo=d.get("tipo") if d.get("tipo") in ("PUT", "CALL") else "PUT",
+                operacao=d.get("operacao") if d.get("operacao") in ("venda", "compra") else "venda",
                 data_abertura=d.get("data_abertura") or hoje,
                 data_vencimento=d.get("data_vencimento") or hoje,
                 strike=float(d.get("strike") or 0), quantidade=float(d.get("quantidade") or 100),
@@ -1283,7 +1287,7 @@ def api_opcoes_add(cid):
     return jsonify({"ok": True, "id": o.id})
 
 
-OPCAO_FIELDS = {"ativo", "tipo", "data_abertura", "data_vencimento", "strike",
+OPCAO_FIELDS = {"ativo", "tipo", "operacao", "data_abertura", "data_vencimento", "strike",
                 "quantidade", "premio", "status", "data_fechamento", "custo_recompra",
                 "preco_medio", "custo_exercicio", "obs"}
 OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra", "preco_medio", "custo_exercicio"}
@@ -1311,6 +1315,9 @@ def api_opcao_editar(oid):
         elif k == "tipo":
             if v in ("PUT", "CALL"):
                 o.tipo = v
+        elif k == "operacao":
+            if v in ("venda", "compra"):
+                o.operacao = v
         elif k == "status":
             if v in ("aberta", "po", "exercida", "recomprada"):
                 o.status = v
@@ -1523,6 +1530,7 @@ def ensure_schema():
     add("asset", "oculto_preco_teto", "oculto_preco_teto INTEGER DEFAULT 0")
     add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
     add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
+    add("opcao_op", "operacao", "operacao VARCHAR(6) DEFAULT 'venda'")
     cols = colunas_de("rent_ativo")
     if cols is not None:
         if "classe" in cols and "is_caixa" in cols:

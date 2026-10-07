@@ -87,6 +87,10 @@
   .badge.po{background:rgba(52,211,153,.16);color:var(--green)}
   .badge.exercida{background:rgba(91,141,239,.16);color:var(--blue)}
   .badge.recomprada{background:rgba(148,163,184,.16);color:var(--muted)}
+  .badge.venda{background:rgba(52,211,153,.16);color:var(--green)}
+  .badge.compra{background:rgba(245,183,84,.16);color:var(--amber)}
+  .estrategia-txt{font-size:11px;color:var(--muted);max-width:220px;display:inline-block;
+                   white-space:normal;line-height:1.3}
   .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
                letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
                padding:26px 0 10px}
@@ -155,15 +159,31 @@
   <div class="addbar" id="addbar">
     <button onclick="novaOperacao()">+ Nova operação</button>
   </div>
-  <div id="abertasVazio" class="muted" style="padding:10px 0">Nenhuma operação em aberto no momento.</div>
-  <div class="ledger" id="abertasBox" style="display:none">
+
+  <h4 style="margin:4px 0 8px;font-size:12px;color:var(--blue)">Puts em aberto</h4>
+  <div id="abertasPutVazio" class="muted" style="padding:10px 0">Nenhuma put em aberto no momento.</div>
+  <div class="ledger" id="abertasPutBox" style="display:none">
     <div class="tbl-scroll">
       <table>
         <thead><tr>
-          <th>Ativo</th><th>Tipo</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
-          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th></th>
+          <th>Ativo</th><th>Operação</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
+          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
         </tr></thead>
-        <tbody id="tbodyAbertas"></tbody>
+        <tbody id="tbodyAbertasPut"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h4 style="margin:18px 0 8px;font-size:12px;color:var(--purple)">Calls em aberto</h4>
+  <div id="abertasCallVazio" class="muted" style="padding:10px 0">Nenhuma call em aberto no momento.</div>
+  <div class="ledger" id="abertasCallBox" style="display:none">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th><th>Operação</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
+          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
+        </tr></thead>
+        <tbody id="tbodyAbertasCall"></tbody>
       </table>
     </div>
   </div>
@@ -194,7 +214,7 @@
     <div class="tbl-scroll limitado">
       <table>
         <thead><tr>
-          <th>Ativo</th><th>Tipo</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
+          <th>Ativo</th><th>Tipo</th><th>Operação</th><th>Estratégia</th><th>Abertura</th><th>Vencimento</th><th>Strike</th>
           <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>Status</th><th>Custo recompra unit.</th>
           <th title="Só pra Call exercida: o preço médio que você já tinha nessa ação antes de ser exercido">Preço médio (ação)</th>
           <th title="Valor TOTAL cobrado pela corretora nessa operação de exercício (varia por operação, digite o que veio na nota)">Custo corretagem</th>
@@ -321,7 +341,29 @@ function diasEntre(a, b){
 }
 // o campo `premio` (e `custo_recompra`) guarda o valor POR OPÇÃO (como é cotado na B3,
 // geralmente centavos) — o total em dinheiro é sempre esse valor × a quantidade de ações
-function premioTotal(o){ return (o.premio||0) * (o.quantidade||0); }
+// Descrição curta (visível na tabela) e longa (tooltip) de cada uma das 4 combinações de
+// tipo × operação — o Rafael só faz venda coberta hoje, mas o campo existe pra quando (se)
+// ele decidir comprar opção também, daí o rótulo já vem explicado na hora.
+const ESTRATEGIAS = {
+  PUT_venda: {curta:'Renda: compromisso de comprar no strike',
+    longa:'Venda de Put: você recebe o prêmio agora e se compromete a comprar o ativo pelo strike se for exercido. Estratégia de geração de renda, normalmente feita com o caixa já reservado pra essa compra.'},
+  CALL_venda: {curta:'Renda: compromisso de vender no strike',
+    longa:'Venda de Call: você recebe o prêmio agora e se compromete a vender o ativo pelo strike se for exercido. Costuma ser feita com uma ação que você já tem (covered call), pra gerar renda sobre ela.'},
+  PUT_compra: {curta:'Proteção ou aposta de queda',
+    longa:'Compra de Put: você paga o prêmio pelo direito de vender o ativo pelo strike. Serve como proteção contra queda numa posição que você já tem (hedge), ou como aposta de que o preço vai cair.'},
+  CALL_compra: {curta:'Aposta de alta ou trava de entrada',
+    longa:'Compra de Call: você paga o prêmio pelo direito de comprar o ativo pelo strike. Serve como aposta de que o preço vai subir, ou pra travar um preço de entrada sem precisar comprar a ação já.'},
+};
+function descricaoEstrategia(tipo, operacao){
+  return ESTRATEGIAS[tipo+'_'+operacao] || {curta:'—', longa:''};
+}
+// Numa VENDA o prêmio entra no bolso (sinal +); numa COMPRA o prêmio sai do bolso (sinal -)
+// — sem isso, uma operação de compra inflaria os totais de "prêmio recebido" (cards, IR,
+// gráfico, ranking, DY) como se fosse renda, quando na verdade é custo. O restante do
+// fechamento de posição (recompra/exercício) continua modelado só pro fluxo de venda
+// coberta, que é o único que o Rafael usa hoje — compra fica registrada e entra certo
+// nesses totais agregados, mas o fechamento dela não tem contabilização própria ainda.
+function premioTotal(o){ return (o.operacao==='compra'?-1:1) * (o.premio||0) * (o.quantidade||0); }
 function custoTotal(o){ return (o.custo_recompra||0) * (o.quantidade||0); }
 // resultado líquido só existe pra operação encerrada: prêmio inteiro, menos o custo de
 // recompra se ela foi fechada antes do vencimento pagando pra sair
@@ -622,18 +664,23 @@ function renderDY(){
   </tr>`;
 }
 
-function renderAbertas(){
-  const abertas = (DATA.operacoes||[]).filter(o=>o.status==='aberta')
-    .sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||''));
-  document.getElementById('abertasVazio').style.display = abertas.length ? 'none' : '';
-  document.getElementById('abertasBox').style.display = abertas.length ? '' : 'none';
+// Puts e Calls em aberto agora em tabelas separadas (pedido do Rafael, pra bater o olho
+// nas duas estratégias sem precisar filtrar) — a mesma linha serve pros dois tipos, só
+// muda o filtro de o.tipo e os ids dos elementos (Put/Call) em cada chamada.
+function renderGrupoAbertas(tipo, idVazio, idBox, idTbody){
   const hoje = hojeStr();
-  document.getElementById('tbodyAbertas').innerHTML = abertas.map(o=>{
+  const abertas = (DATA.operacoes||[]).filter(o=>o.status==='aberta' && o.tipo===tipo)
+    .sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||''));
+  document.getElementById(idVazio).style.display = abertas.length ? 'none' : '';
+  document.getElementById(idBox).style.display = abertas.length ? '' : 'none';
+  document.getElementById(idTbody).innerHTML = abertas.map(o=>{
     const dias = diasEntre(hoje, o.data_vencimento);
     const pctStrike = o.strike ? (o.premio/o.strike*100) : null;
+    const operacao = o.operacao||'venda';
+    const estr = descricaoEstrategia(o.tipo, operacao);
     return `<tr>
       <td><b>${o.ativo}</b></td>
-      <td><span class="badge ${o.tipo.toLowerCase()}">${o.tipo==='PUT'?'Put':'Call'}</span></td>
+      <td><span class="badge ${operacao}">${operacao==='venda'?'Venda':'Compra'}</span></td>
       <td>${fmtData(o.data_vencimento)}</td>
       <td class="${dias!=null && dias<=7 ? 'neg':''}">${dias==null?'—':dias+'d'}</td>
       <td>${BRL(o.strike)}</td>
@@ -641,11 +688,16 @@ function renderAbertas(){
       <td>${BRL(o.premio)}</td>
       <td>${BRL(premioTotal(o))}</td>
       <td>${pctStrike==null?'—':PCT(pctStrike)}</td>
+      <td><span class="estrategia-txt" title="${estr.longa}">${estr.curta}</span></td>
       <td class="acoes-cell">
         ${EDIT ? `<button class="mini ghost" onclick="abrirEncerrar(${o.id})">Encerrar</button>` : ''}
       </td>
     </tr>`;
   }).join('');
+}
+function renderAbertas(){
+  renderGrupoAbertas('PUT', 'abertasPutVazio', 'abertasPutBox', 'tbodyAbertasPut');
+  renderGrupoAbertas('CALL', 'abertasCallVazio', 'abertasCallBox', 'tbodyAbertasCall');
 }
 
 function fmtData(d){
@@ -658,7 +710,7 @@ function renderTabela(){
   const ops = opsFiltradas().slice().sort((a,b)=>(b.data_abertura||'').localeCompare(a.data_abertura||''));
   const tb = document.getElementById('tbodyHist');
   if(!ops.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="18">Nenhuma operação encontrada.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="20">Nenhuma operação encontrada.</td></tr>`;
     return;
   }
   tb.innerHTML = ops.map(o=>{
@@ -668,12 +720,18 @@ function renderTabela(){
     const lucroVenda = lucroVendaAcao(o);
     const lucroTotal = lucroTotalOperacao(o);
     const dis = EDIT ? '' : 'disabled';
+    const estr = descricaoEstrategia(o.tipo, o.operacao||'venda');
     return `<tr data-id="${o.id}">
       <td class="ativo-cell"><input value="${o.ativo}" ${dis} onchange="editarCampo(${o.id},'ativo',this.value)"></td>
       <td><select ${dis} onchange="editarCampo(${o.id},'tipo',this.value)">
             <option value="PUT" ${o.tipo==='PUT'?'selected':''}>Put</option>
             <option value="CALL" ${o.tipo==='CALL'?'selected':''}>Call</option>
           </select></td>
+      <td><select ${dis} onchange="editarCampo(${o.id},'operacao',this.value)">
+            <option value="venda" ${(o.operacao||'venda')==='venda'?'selected':''}>Venda</option>
+            <option value="compra" ${o.operacao==='compra'?'selected':''}>Compra</option>
+          </select></td>
+      <td><span class="estrategia-txt" title="${estr.longa}">${estr.curta}</span></td>
       <td><input type="date" value="${o.data_abertura||''}" ${dis} onchange="editarCampo(${o.id},'data_abertura',this.value)"></td>
       <td><input type="date" value="${o.data_vencimento||''}" ${dis} onchange="editarCampo(${o.id},'data_vencimento',this.value)" title="Opção europeia: o fechamento sempre acontece nessa data"></td>
       <td>${inputMoeda(o.id,'strike',o.strike,dis)}</td>
@@ -722,7 +780,7 @@ async function novaOperacao(){
   const hoje = hojeStr();
   const venc = new Date(); venc.setDate(venc.getDate()+30);
   const r = await fetch('/api/carteira/'+CID+'/opcoes',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ativo:'', tipo:'PUT', data_abertura:hoje, data_vencimento:venc.toISOString().slice(0,10),
+    body: JSON.stringify({ativo:'', tipo:'PUT', operacao:'venda', data_abertura:hoje, data_vencimento:venc.toISOString().slice(0,10),
       strike:0, quantidade:100, premio:0})});
   const d = await r.json();
   if(d.ok){ await load(); const linha=document.querySelector(`tr[data-id="${d.id}"] input`); if(linha) linha.focus(); }

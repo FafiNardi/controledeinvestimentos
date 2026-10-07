@@ -215,9 +215,12 @@
         <td></td>
         <td><select id="newClasse"></select></td>
         <td><select id="newSeg"></select></td>
-        <td></td>
+        <td id="totalTenho" class="muted" style="font-weight:600"></td>
         <td><input id="newPct" type="number" placeholder="% ideal" style="text-align:left"></td>
-        <td colspan="4"></td>
+        <td></td>
+        <td></td>
+        <td id="totalFalta" class="muted" style="font-weight:600"></td>
+        <td></td>
         <td><button id="btnAddAsset" onclick="addAsset()">Adicionar</button>
           <span id="statusAdd" class="muted" style="margin-left:6px"></span></td>
       </tr>
@@ -380,6 +383,11 @@ function renderRows(){
       ? ` <span class="arr">${SORT.dir>0?'▲':'▼'}</span>` : '');
   });
   document.getElementById('filtroInfo').textContent = `${dados.length} de ${STATE.assets.length} ativos`;
+  // Soma de "Tenho R$"/"Falta R$" da visão atual (respeita o filtro de Classe) — dá uma
+  // visão rápida de quanto está investido (e quanto falta aportar) na classe selecionada,
+  // sem precisar somar linha por linha na mão.
+  document.getElementById('totalTenho').textContent = dados.length ? BRL(dados.reduce((s,a)=>s+(a.tenho||0),0)) : '';
+  document.getElementById('totalFalta').textContent = dados.length ? BRL(dados.reduce((s,a)=>s+(a.falta||0),0)) : '';
   if(CID && EDIT && STATE.assets.length===0){
     tb.innerHTML = `<tr><td colspan="18" style="text-align:center;padding:26px;color:var(--muted)">
       Carteira vazia — adicione seu primeiro ativo na linha abaixo.</td></tr>`;

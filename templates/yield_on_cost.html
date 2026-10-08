@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yield on Cost • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754;
+    --page-a:var(--green); --page-b:var(--blue); --tab-txt-on:#04211d;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309;
+    --tab-txt-on:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .num,.stat .v,td,td input,td select,th{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:'Manrope',sans-serif}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:'Manrope',sans-serif}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0;font-family:'Manrope',sans-serif}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:'Manrope',sans-serif;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap;font-family:'Manrope',sans-serif}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0;font-family:'Manrope',sans-serif}
+  .ctx-label select{max-width:240px}
+
+  .wrap{padding:0 24px 40px}
+  .muted{color:var(--muted)}
+  .stats{display:flex;gap:10px;padding:20px 24px 14px;flex-wrap:wrap;align-items:stretch}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+        padding:10px 14px;min-width:160px;flex:1}
+  .stat .k{font-size:10.5px;color:var(--muted);white-space:nowrap;font-weight:700;
+           text-transform:uppercase;letter-spacing:.04em;font-family:'Manrope',sans-serif}
+  .stat .v{font-size:19px;font-weight:700;margin-top:5px;white-space:nowrap}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:2px;font-family:'Manrope',sans-serif}
+  .pos{color:var(--green)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px;font-family:'Manrope',sans-serif}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 2px}
+  .toolbar label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;
+                 font-weight:700;font-family:'Manrope',sans-serif}
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
+     text-transform:uppercase;letter-spacing:.04em}
+  th.sortable{cursor:pointer;user-select:none}
+  th.sortable:hover{color:var(--txt)}
+  th .arr{color:var(--accent);font-size:10px}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td.ativo-cell{text-align:left;font-weight:700}
+  td.classe-cell{text-align:left;color:var(--muted)}
+  .empty-row td{text-align:center;color:var(--muted);padding:22px}
+  tfoot td{font-weight:700;background:var(--panel2)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Yield on Cost</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/preco-teto'">🏷️ Preço Teto</button>
+      <button class="tab-link" onclick="location.href='/numero-magico'">🔢 Número Mágico</button>
+      <button class="tab-link on">💰 Yield on Cost</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stats" id="stats"></div>
+
+  <div class="group-label">Yield on cost por ativo</div>
+  <p class="muted" style="font-size:12px;margin:0 0 4px">
+    Dividendo/provento acumulado (lançado na aba <b>Rentabilidade</b>) dividido pelo valor
+    investido — quantidade × preço médio, vindo do <b>Rebalanceamento</b>. É sempre sobre o
+    seu custo, não sobre o valor de mercado atual. Ativos classificados como <b>Caixa</b> não
+    entram (não faz sentido falar de "dividendo" em dinheiro parado).
+  </p>
+  <div class="toolbar">
+    <label>Classe:
+      <select id="filtroClasse" onchange="renderTabela()"><option value="">Todas</option></select>
+    </label>
+    <span id="filtroInfo" class="muted" style="font-size:11.5px"></span>
+  </div>
+
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th class="sortable" data-sort="nome"><span class="th-label">Ativo</span></th>
+          <th class="sortable" data-sort="classe"><span class="th-label">Classe</span></th>
+          <th class="sortable" data-sort="investido"><span class="th-label">Valor Investido</span></th>
+          <th class="sortable" data-sort="total"><span class="th-label">Div. Total</span></th>
+          <th class="sortable" data-sort="m24"><span class="th-label">Div. 24m</span></th>
+          <th class="sortable" data-sort="m12"><span class="th-label">Div. 12m</span></th>
+          <th class="sortable" data-sort="ano"><span class="th-label">Div. Ano</span></th>
+          <th class="sortable" data-sort="yield_total"><span class="th-label">Yield Total</span></th>
+          <th class="sortable" data-sort="yield_24m"><span class="th-label">Yield 24m</span></th>
+          <th class="sortable" data-sort="yield_12m"><span class="th-label">Yield 12m</span></th>
+          <th class="sortable" data-sort="yield_ano"><span class="th-label">Yield Ano</span></th>
+        </tr></thead>
+        <tbody id="tbodyYoC"></tbody>
+        <tfoot id="tfootYoC"></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let CID = null, DATA = { linhas: [], totais: {} }, MOEDA = 'BRL';
+let SORT = {field:null, dir:1};
+
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const PCT = v => v==null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+
+async function load(){
+  const r = await fetch('/api/carteira/'+CID+'/yield-on-cost');
+  DATA = await r.json();
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  popularFiltroClasse();
+  renderStats();
+  renderTabela();
+}
+
+function popularFiltroClasse(){
+  const sel = document.getElementById('filtroClasse');
+  const atual = sel.value;
+  const classes = [...new Set((DATA.linhas||[]).map(l=>l.classe).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  sel.innerHTML = '<option value="">Todas</option>' + classes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  if(classes.includes(atual)) sel.value = atual;
+}
+
+function renderStats(){
+  const t = DATA.totais || {};
+  const anoAtual = DATA.ano_atual || new Date().getFullYear();
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="k">Valor Investido</div><div class="v">${BRL(t.investido)}</div>
+      <div class="sub">base de cálculo (qtd × preço médio)</div></div>
+    <div class="stat"><div class="k">Yield Total</div><div class="v ${(t.yield_total||0)>0?'pos':''}">${PCT(t.yield_total)}</div>
+      <div class="sub">${BRL(t.total)} em proventos, desde sempre</div></div>
+    <div class="stat"><div class="k">Yield 24 meses</div><div class="v ${(t.yield_24m||0)>0?'pos':''}">${PCT(t.yield_24m)}</div>
+      <div class="sub">${BRL(t.m24)} nos últimos 24 meses</div></div>
+    <div class="stat"><div class="k">Yield 12 meses</div><div class="v ${(t.yield_12m||0)>0?'pos':''}">${PCT(t.yield_12m)}</div>
+      <div class="sub">${BRL(t.m12)} nos últimos 12 meses</div></div>
+    <div class="stat"><div class="k">Yield ${anoAtual}</div><div class="v ${(t.yield_ano||0)>0?'pos':''}">${PCT(t.yield_ano)}</div>
+      <div class="sub">${BRL(t.ano)} no ano vigente</div></div>
+  `;
+}
+
+function setSort(f){ if(SORT.field===f){SORT.dir*=-1;}else{SORT.field=f;SORT.dir=1;} renderTabela(); }
+
+function linhasFiltradas(){
+  const fc = document.getElementById('filtroClasse').value;
+  let arr = (DATA.linhas||[]).filter(l=>!fc || l.classe===fc);
+  if(SORT.field){
+    const f = SORT.field;
+    arr = [...arr].sort((a,b)=>{
+      let x=a[f], y=b[f];
+      if(typeof x==='string' || typeof y==='string'){
+        x=(x||'').toString().toLowerCase(); y=(y||'').toString().toLowerCase();
+        return x<y?-SORT.dir : x>y?SORT.dir : 0;
+      }
+      // valores null (yield sem base de cálculo) sempre vão pro fim, em qualquer direção
+      if(x==null && y==null) return 0;
+      if(x==null) return 1;
+      if(y==null) return -1;
+      return (x-y)*SORT.dir;
+    });
+  }
+  return arr;
+}
+
+function renderTabela(){
+  document.querySelectorAll('th.sortable .th-label').forEach(label=>{
+    const base = label.dataset.base || (label.dataset.base = label.textContent);
+    const th = label.closest('th');
+    label.innerHTML = base + (SORT.field===th.dataset.sort
+      ? ` <span class="arr">${SORT.dir>0?'▲':'▼'}</span>` : '');
+  });
+  const linhas = linhasFiltradas();
+  document.getElementById('filtroInfo').textContent = `${linhas.length} de ${(DATA.linhas||[]).length} ativos`;
+  const tb = document.getElementById('tbodyYoC');
+  if(!linhas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum provento lançado ainda — lance os proventos mensais na aba Rentabilidade pra esse relatório ganhar vida.</td></tr>`;
+    document.getElementById('tfootYoC').innerHTML = '';
+    return;
+  }
+  tb.innerHTML = linhas.map(l=>`<tr>
+      <td class="ativo-cell">${l.nome}</td>
+      <td class="classe-cell">${l.classe||'—'}</td>
+      <td>${BRL(l.investido)}</td>
+      <td>${BRL(l.total)}</td>
+      <td>${BRL(l.m24)}</td>
+      <td>${BRL(l.m12)}</td>
+      <td>${BRL(l.ano)}</td>
+      <td class="${(l.yield_total||0)>0?'pos':''}">${PCT(l.yield_total)}</td>
+      <td class="${(l.yield_24m||0)>0?'pos':''}">${PCT(l.yield_24m)}</td>
+      <td class="${(l.yield_12m||0)>0?'pos':''}">${PCT(l.yield_12m)}</td>
+      <td class="${(l.yield_ano||0)>0?'pos':''}">${PCT(l.yield_ano)}</td>
+    </tr>`).join('');
+  const t = DATA.totais || {};
+  document.getElementById('tfootYoC').innerHTML = `<tr>
+      <td>Total da carteira</td><td></td>
+      <td>${BRL(t.investido)}</td>
+      <td>${BRL(t.total)}</td>
+      <td>${BRL(t.m24)}</td>
+      <td>${BRL(t.m12)}</td>
+      <td>${BRL(t.ano)}</td>
+      <td>${PCT(t.yield_total)}</td>
+      <td>${PCT(t.yield_24m)}</td>
+      <td>${PCT(t.yield_12m)}</td>
+      <td>${PCT(t.yield_ano)}</td>
+    </tr>`;
+}
+
+document.querySelectorAll('th.sortable').forEach(th=>
+  th.addEventListener('click', ()=> setSort(th.dataset.sort)));
+
+carregarCarteiras();
+</script>
+</body>
+</html>

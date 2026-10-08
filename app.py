@@ -1393,6 +1393,88 @@ def api_numero_magico(cid):
     })
 
 
+@app.route("/yield-on-cost")
+@login_required
+def yield_on_cost():
+    return render_template("yield_on_cost.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/yield-on-cost")
+@login_required
+def api_yield_on_cost(cid):
+    """Yield on Cost = dividendo/provento acumulado ÷ valor investido (custo), não o valor
+    de mercado atual. A fonte do histórico de proventos é o módulo Rentabilidade (RentAtivo/
+    RentMov — é onde o usuário já lança provento por mês, mês a mês); o valor investido
+    (custo) vem do Rebalanceamento (Asset.num_acoes × Asset.preco_medio), casando os dois
+    pelo nome/ticker (mesma string nos dois módulos, mas são tabelas independentes — não há
+    FK entre elas). Um RentAtivo sem Asset correspondente (posição já encerrada no
+    Rebalanceamento, por exemplo) ainda aparece com o histórico de proventos, só que sem
+    valor investido — yield fica null (não dá pra calcular % sobre uma base zero)."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    hoje = datetime.now()
+    ano_atual = hoje.year
+    chave_atual = hoje.year * 12 + hoje.month
+    limite_24m = chave_atual - 23   # janela de 24 meses contando o mês atual como o 1º
+    limite_12m = chave_atual - 11
+
+    ativos = (RentAtivo.query.filter_by(carteira_id=cid)
+              .options(db.joinedload(RentAtivo.movs)).all())
+    assets_por_nome = {a.ticker.strip().upper(): a
+                        for a in Asset.query.filter_by(carteira_id=cid).all()}
+
+    def pct(valor, base):
+        return (valor / base * 100) if base else None
+
+    linhas = []
+    tot = {"investido": 0.0, "total": 0.0, "m24": 0.0, "m12": 0.0, "ano": 0.0}
+    for ra in ativos:
+        if (ra.classe or "").strip().lower() == "caixa" or ra.is_caixa:
+            continue
+        total = m24 = m12 = ano = 0.0
+        for mv in ra.movs:
+            p = mv.proventos or 0
+            if not p:
+                continue
+            chave = mv.ano * 12 + mv.mes
+            total += p
+            if chave >= limite_24m:
+                m24 += p
+            if chave >= limite_12m:
+                m12 += p
+            if mv.ano == ano_atual:
+                ano += p
+        if total == 0 and m24 == 0 and m12 == 0 and ano == 0:
+            continue  # ativo sem nenhum provento lançado — não soma nada ao relatório
+        asset = assets_por_nome.get(ra.nome.strip().upper())
+        investido = ((asset.num_acoes or 0) * (asset.preco_medio or 0)) if asset else 0
+        linhas.append({
+            "nome": ra.nome, "classe": ra.classe or "", "investido": investido,
+            "total": total, "m24": m24, "m12": m12, "ano": ano,
+            "yield_total": pct(total, investido), "yield_24m": pct(m24, investido),
+            "yield_12m": pct(m12, investido), "yield_ano": pct(ano, investido),
+        })
+        tot["investido"] += investido
+        tot["total"] += total
+        tot["m24"] += m24
+        tot["m12"] += m12
+        tot["ano"] += ano
+
+    return jsonify({
+        "linhas": linhas,
+        "totais": {
+            **tot,
+            "yield_total": pct(tot["total"], tot["investido"]),
+            "yield_24m": pct(tot["m24"], tot["investido"]),
+            "yield_12m": pct(tot["m12"], tot["investido"]),
+            "yield_ano": pct(tot["ano"], tot["investido"]),
+        },
+        "ano_atual": ano_atual,
+        "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
+        "editavel": c.user_id == current_user.id,
+    })
+
+
 @app.route("/preco-teto")
 @login_required
 def preco_teto():

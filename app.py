@@ -1399,17 +1399,43 @@ def yield_on_cost():
     return render_template("yield_on_cost.html", usuario=current_user.nome)
 
 
+def _valor_investido_por_aportes(movs):
+    """Estima o valor investido (custo) de um ativo que já não existe mais no Rebalanceamento
+    (posição zerada/vendida por completo lá, ou nunca cadastrada), somando aporte − resgate
+    mês a mês dentro do histórico de Rentabilidade — é o dinheiro líquido que entrou no
+    ativo. A soma reinicia toda vez que a posição é encerrada DE VERDADE (valor_final == 0 —
+    não None, que só significa "mês ainda não fechado", igual já é tratado em rent_compute()):
+    sem isso, um ativo vendido e comprado de novo depois somaria os dois ciclos juntos, como
+    se o custo da compra antiga ainda valesse pra essa nova. No mês em que a posição é
+    encerrada (valor_final == 0), o valor é "congelado" no que estava investido ANTES desse
+    fechamento (o aporte/resgate desse mesmo mês não entra na soma — ele só está liquidando,
+    não é mais posição) — se somássemos a resgate que zera tudo, o resultado seria sempre 0,
+    perdendo justamente o dado que queremos: o custo histórico pra calcular o yield-on-cost
+    de um ativo que não existe mais na carteira hoje."""
+    corrente = 0.0
+    congelado = 0.0
+    for mv in sorted(movs, key=lambda m: (m.ano, m.mes)):
+        if mv.valor_final is not None and mv.valor_final <= 0:
+            if corrente > 0:
+                congelado = corrente
+            corrente = 0.0
+            continue
+        corrente += (mv.aporte or 0) - (mv.resgate or 0)
+    return corrente if corrente > 0 else congelado
+
+
 @app.route("/api/carteira/<int:cid>/yield-on-cost")
 @login_required
 def api_yield_on_cost(cid):
     """Yield on Cost = dividendo/provento acumulado ÷ valor investido (custo), não o valor
     de mercado atual. A fonte do histórico de proventos é o módulo Rentabilidade (RentAtivo/
-    RentMov — é onde o usuário já lança provento por mês, mês a mês); o valor investido
-    (custo) vem do Rebalanceamento (Asset.num_acoes × Asset.preco_medio), casando os dois
-    pelo nome/ticker (mesma string nos dois módulos, mas são tabelas independentes — não há
-    FK entre elas). Um RentAtivo sem Asset correspondente (posição já encerrada no
-    Rebalanceamento, por exemplo) ainda aparece com o histórico de proventos, só que sem
-    valor investido — yield fica null (não dá pra calcular % sobre uma base zero)."""
+    RentMov — é onde o usuário já lança provento por mês, mês a mês). O valor investido tenta
+    primeiro o Rebalanceamento (Asset.num_acoes × Asset.preco_medio, casando os dois pelo
+    nome/ticker — tabelas independentes, sem FK entre elas), que é o número mais preciso
+    enquanto a posição está ativa; quando o ativo já foi vendido por completo (ou nunca foi
+    cadastrado lá), cai pro cálculo por aporte − resgate (_valor_investido_por_aportes) —
+    sem isso esses ativos ficavam com yield null pra sempre, mesmo tendo histórico de
+    provento completo."""
     c = get_carteira_or_404(cid)
     require_owner(c)
     hoje = datetime.now()
@@ -1447,7 +1473,10 @@ def api_yield_on_cost(cid):
         if total == 0 and m24 == 0 and m12 == 0 and ano == 0:
             continue  # ativo sem nenhum provento lançado — não soma nada ao relatório
         asset = assets_por_nome.get(ra.nome.strip().upper())
-        investido = ((asset.num_acoes or 0) * (asset.preco_medio or 0)) if asset else 0
+        if asset and (asset.num_acoes or 0) > 0 and (asset.preco_medio or 0) > 0:
+            investido = (asset.num_acoes or 0) * (asset.preco_medio or 0)
+        else:
+            investido = _valor_investido_por_aportes(ra.movs)
         linhas.append({
             "nome": ra.nome, "classe": ra.classe or "", "investido": investido,
             "total": total, "m24": m24, "m12": m12, "ano": ano,

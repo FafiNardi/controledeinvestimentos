@@ -124,9 +124,12 @@
   <div class="group-label">Yield on cost por ativo</div>
   <p class="muted" style="font-size:12px;margin:0 0 4px">
     Dividendo/provento acumulado (lançado na aba <b>Rentabilidade</b>) dividido pelo valor
-    investido — quantidade × preço médio, vindo do <b>Rebalanceamento</b>. É sempre sobre o
-    seu custo, não sobre o valor de mercado atual. Ativos classificados como <b>Caixa</b> não
-    entram (não faz sentido falar de "dividendo" em dinheiro parado).
+    investido — quantidade × preço médio, vindo do <b>Rebalanceamento</b> enquanto a posição
+    está ativa lá; se o ativo já foi vendido por completo (ou nunca foi cadastrado no
+    Rebalanceamento), o valor investido é estimado somando aporte − resgate lançados na
+    Rentabilidade, pra não perder o yield histórico de ativos que você não tem mais. É
+    sempre sobre o seu custo, não sobre o valor de mercado atual. Ativos classificados como
+    <b>Caixa</b> não entram (não faz sentido falar de "dividendo" em dinheiro parado).
   </p>
   <div class="toolbar">
     <label>Classe:

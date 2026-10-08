@@ -112,6 +112,9 @@
   th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
   th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
      text-transform:uppercase;letter-spacing:.04em}
+  th.sortable{cursor:pointer;user-select:none}
+  th.sortable:hover{color:var(--txt)}
+  th .arr{color:var(--accent);font-size:10px}
   td:first-child,th:first-child{text-align:left}
   tbody tr:last-child td{border-bottom:0}
   tr:hover td{background:var(--panel2)}
@@ -274,7 +277,10 @@
     <div class="tbl-scroll">
       <table>
         <thead><tr>
-          <th>Ativo</th><th>Prêmio recebido</th><th>Valor investido</th><th>DY (opções)</th>
+          <th class="sortable" data-sort="ativo"><span class="th-label">Ativo</span></th>
+          <th class="sortable" data-sort="premio"><span class="th-label">Prêmio recebido</span></th>
+          <th class="sortable" data-sort="investido"><span class="th-label">Valor investido</span></th>
+          <th class="sortable" data-sort="dy"><span class="th-label">DY (opções)</span></th>
         </tr></thead>
         <tbody id="tbodyDY"></tbody>
         <tfoot id="tfootDY"></tfoot>
@@ -617,7 +623,21 @@ function renderRanking(){
     </div>`).join('') : '<div class="muted" style="padding:10px 0">Nenhuma operação lançada ainda.</div>';
 }
 
+// estado de ordenação da tabela de DY das opções — igual ao padrão usado nas outras abas
+// (clique no cabeçalho ordena, clique de novo inverte), só que local a essa tabela
+let SORT_DY = {campo:null, dir:1};
+function setSortDY(campo){
+  if(SORT_DY.campo===campo) SORT_DY.dir*=-1; else { SORT_DY.campo=campo; SORT_DY.dir=1; }
+  renderDY();
+}
+
 function renderDY(){
+  document.querySelectorAll('th.sortable').forEach(th=>{
+    const label = th.querySelector('.th-label');
+    const base = label.dataset.base || (label.dataset.base = label.textContent);
+    label.innerHTML = base + (SORT_DY.campo===th.dataset.sort
+      ? ` <span class="arr">${SORT_DY.dir>0?'▲':'▼'}</span>` : '');
+  });
   const ops = DATA.operacoes||[];
   const porAtivo = {};
   ops.forEach(o=>{
@@ -630,8 +650,7 @@ function renderDY(){
   (DATA.ativos||[]).forEach(a=>{
     if(a.classe==='Ação') investidoPorAtivo[a.ticker] = a.valor_investido||0;
   });
-  const tickers = [...new Set([...Object.keys(porAtivo), ...Object.keys(investidoPorAtivo)])]
-    .sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const tickers = [...new Set([...Object.keys(porAtivo), ...Object.keys(investidoPorAtivo)])];
   const tb = document.getElementById('tbodyDY');
   const tf = document.getElementById('tfootDY');
   if(!tickers.length){
@@ -639,10 +658,27 @@ function renderDY(){
     tf.innerHTML = '';
     return;
   }
-  tb.innerHTML = tickers.map(t=>{
+  let linhas = tickers.map(t=>{
     const premio = porAtivo[t] || 0;
     const investido = investidoPorAtivo[t];
     const dy = (investido!=null && investido>0) ? premio/investido*100 : null;
+    return {ativo:t, premio, investido, dy};
+  });
+  if(SORT_DY.campo){
+    const f = SORT_DY.campo;
+    linhas.sort((a,b)=>{
+      if(f==='ativo') return a.ativo.localeCompare(b.ativo,'pt-BR')*SORT_DY.dir;
+      const x=a[f], y=b[f];
+      // null (sem valor investido, logo sem DY) sempre vai pro fim, em qualquer direção
+      if(x==null && y==null) return 0;
+      if(x==null) return 1;
+      if(y==null) return -1;
+      return (x-y)*SORT_DY.dir;
+    });
+  } else {
+    linhas.sort((a,b)=>a.ativo.localeCompare(b.ativo,'pt-BR'));
+  }
+  tb.innerHTML = linhas.map(({ativo:t, premio, investido, dy})=>{
     return `<tr>
       <td class="ativo-cell">${t}</td>
       <td>${BRL(premio)}</td>
@@ -832,6 +868,9 @@ async function excluirOp(id){
   await fetch('/api/opcoes/'+id,{method:'DELETE'});
   await load();
 }
+
+document.querySelectorAll('th.sortable').forEach(th=>
+  th.addEventListener('click', ()=> setSortDY(th.dataset.sort)));
 
 carregarCarteiras();
 </script>

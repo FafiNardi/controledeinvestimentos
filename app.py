@@ -850,53 +850,101 @@ def api_delete_asset(aid):
     return jsonify({"ok": True})
 
 
+# --------------------------------------------------------------------------- #
+# "Atualizar cotações" — refeito do zero (2026-10-10)
+#
+# Tentativa anterior: o próprio request HTTP buscava as cotações (em paralelo, até 24 de
+# cada vez) e só respondia no final. Não importa quanto paralelismo a gente colocasse, o
+# PRÓPRIO PROXY da Render (não o nosso gunicorn — esse aguenta 90s) corta a conexão com 502
+# perto de ~30s, e o plano free parece não entregar paralelismo de verdade pra escapar disso.
+# A segunda tentativa (o navegador dividir a carteira em lotes menores e chamar o endpoint
+# várias vezes) ainda deixava o usuário exposto a qualquer lote individual que passasse dos
+# ~30s, e ficou frágil/complicada de manter.
+#
+# Solução nova: o request HTTP não espera a busca terminar NUNCA — ele só anota "comece a
+# atualizar essa carteira" numa variável em memória e devolve resposta na hora (sempre em
+# milissegundos, não corre risco nenhum de timeout). A busca de verdade roda numa thread em
+# segundo plano, independente do ciclo requisição/resposta que a disparou. O navegador
+# acompanha o progresso chamando /refresh/status de tempos em tempos (polling) — essa
+# chamada também é instantânea, só lê o dicionário em memória, então nunca tem o que estourar.
+#
+# Funciona com a Render de hoje porque o Procfile sobe só 1 worker gunicorn (sem --workers):
+# esse dicionário em memória é visto por toda requisição do processo. Se um dia o número de
+# workers mudar (mais de 1), isso para de funcionar direito — cada worker teria sua própria
+# cópia do dicionário, e o polling podia cair num worker que nunca viu aquele job.
+_REFRESH_LOCK = threading.Lock()
+_REFRESH_JOBS = {}  # carteira_id -> {"rodando","total","feito","erro","concluido_em"}
+
+
+def _job_vazio(total=0):
+    return {"rodando": False, "total": total, "feito": 0, "erro": None, "concluido_em": None}
+
+
+def _rodar_refresh_em_background(cid, pares, moeda):
+    """Roda na thread em segundo plano — pares é [(asset_id, ticker), ...], já extraído como
+    strings/números simples ANTES de entrar aqui, porque os objetos Asset do SQLAlchemy não
+    sobrevivem a trocar de thread (a sessão é presa ao contexto de aplicação que a criou).
+    Com app.app_context() cria um contexto (e portanto uma sessão) novo, só dessa thread."""
+    with app.app_context():
+        try:
+            respostas = {}
+            with ThreadPoolExecutor(max_workers=24) as ex:
+                futuros = {ex.submit(fetch_quote, ticker, moeda): aid for aid, ticker in pares}
+                for fut in as_completed(futuros):
+                    aid = futuros[fut]
+                    respostas[aid] = fut.result()
+                    with _REFRESH_LOCK:
+                        _REFRESH_JOBS[cid]["feito"] += 1
+            for aid, q in respostas.items():
+                a = db.session.get(Asset, aid)
+                if a and q["preco"]:
+                    a.preco = q["preco"]
+                    a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)
+                    a.pvp = q["pvp"] or 0
+                    a.dy = q["dy"] or 0
+                    a.updated_at = datetime.now().isoformat(timespec="seconds")
+            db.session.commit()
+        except Exception as e:  # noqa: BLE001 — nunca pode deixar o job "rodando" pra sempre
+            with _REFRESH_LOCK:
+                _REFRESH_JOBS[cid]["erro"] = str(e)
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESH_JOBS[cid]["rodando"] = False
+                _REFRESH_JOBS[cid]["concluido_em"] = datetime.now().isoformat(timespec="seconds")
+
+
 @app.route("/api/carteira/<int:cid>/refresh", methods=["POST"])
 @login_required
 def api_refresh(cid):
-    """Busca a cotação de cada ativo em paralelo — mesmo com 24 workers (I/O de rede, não CPU),
-    o PRÓPRIO PROXY da Render (não o nosso gunicorn, esse já aguenta 90s) corta a conexão com
-    502 ao redor de ~30s, e testes diretos em produção mostraram que isso ainda acontecia com
-    35+ ativos reais mesmo paralelizando — o plano free da Render parece não entregar paralelismo
-    de verdade, só o gunicorn/CPU compartilhados. Como não dá pra configurar esse timeout (é da
-    infraestrutura deles, não nosso), a defesa é o frontend (ver refresh() em index.html) dividir
-    a carteira em lotes de ~20 ativos e chamar esse endpoint uma vez por lote — cada chamada aqui
-    processa só o "ids" recebido (ou a carteira inteira, se "ids" não vier, pra manter compatível
-    com chamadas antigas/carteiras pequenas).
-
-    As threads do pool só fazem a parte de rede (fetch_quote com ticker/moeda, sem tocar em
-    nenhum objeto do banco) — passar um Asset do SQLAlchemy pra dentro de uma thread quebra,
-    porque a sessão do Flask-SQLAlchemy é presa ao contexto da aplicação, que essas threads não
-    têm. A escrita no banco acontece depois, de volta na thread principal, com os resultados já
-    prontos."""
     c = get_carteira_or_404(cid)
-    require_owner(c)  # carteira agora é privada: só o dono mexe (antes qualquer logado podia)
-    ids = (request.get_json(silent=True) or {}).get("ids")
-    query = Asset.query.filter_by(carteira_id=cid, manual=0)
-    if ids:
-        query = query.filter(Asset.id.in_(ids))
-    assets = query.all()
-    moeda = c.moeda or "BRL"
+    require_owner(c)
+    with _REFRESH_LOCK:
+        job_atual = _REFRESH_JOBS.get(cid)
+        if job_atual and job_atual["rodando"]:
+            return jsonify({"ok": True, **job_atual})
+        assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
+        pares = [(a.id, a.ticker) for a in assets]
+        if not pares:
+            job = _job_vazio()
+            job["concluido_em"] = datetime.now().isoformat(timespec="seconds")
+            _REFRESH_JOBS[cid] = job
+            return jsonify({"ok": True, **job})
+        job = _job_vazio(total=len(pares))
+        job["rodando"] = True
+        _REFRESH_JOBS[cid] = job
+    threading.Thread(target=_rodar_refresh_em_background,
+                      args=(cid, pares, c.moeda or "BRL"), daemon=True).start()
+    return jsonify({"ok": True, **job})
 
-    respostas = {}
-    with ThreadPoolExecutor(max_workers=24) as ex:
-        futuros = {ex.submit(fetch_quote, a.ticker, moeda): a.id for a in assets}
-        for fut in as_completed(futuros):
-            respostas[futuros[fut]] = fut.result()
 
-    resultados = []
-    for i, a in enumerate(assets, start=1):
-        q = respostas[a.id]
-        if q["preco"]:
-            a.preco = q["preco"]
-            a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)
-            a.pvp = q["pvp"] or 0
-            a.dy = q["dy"] or 0
-            a.updated_at = datetime.now().isoformat(timespec="seconds")
-        resultados.append({"ticker": a.ticker, **q})
-        if i % 15 == 0:
-            db.session.commit()
-    db.session.commit()
-    return jsonify({"ok": True, "resultados": resultados})
+@app.route("/api/carteira/<int:cid>/refresh/status")
+@login_required
+def api_refresh_status(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    with _REFRESH_LOCK:
+        job = _REFRESH_JOBS.get(cid) or _job_vazio()
+        return jsonify(dict(job))
 
 
 # --------------------------------------------------------------------------- #

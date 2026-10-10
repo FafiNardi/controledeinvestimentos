@@ -619,50 +619,58 @@ async function copiarDaRentabilidade(){
   st.textContent = `✓ ${faltando.length} copiado(s)`;
   setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 5000);
 }
+// "Atualizar cotações" refeito do zero (2026-10-10): o POST só avisa o servidor "comece a
+// atualizar" e volta na hora — quem busca as cotações de verdade é uma thread em segundo
+// plano lá no servidor, que continua rodando independente dessa requisição já ter
+// terminado. O navegador só fica perguntando /refresh/status de tempos em tempos até a
+// thread acabar. Isso substitui de vez a ideia anterior (dividir em lotes aqui no
+// navegador e torcer pra nenhum lote individual passar dos ~30s do proxy da Render) — agora
+// NENHUMA chamada HTTP espera a busca terminar, então não tem timeout pra estourar.
 async function refresh(){
   if(!CID) return;
   const b=document.getElementById('btnRefresh'), st=document.getElementById('status');
   b.disabled=true;
-  // O proxy da Render (não o nosso servidor) corta a conexão com 502 perto de ~30s, e
-  // carteiras com 35+ ativos reais já bateram nisso mesmo com busca em paralelo — o jeito
-  // é o PRÓPRIO NAVEGADOR dividir em lotes pequenos e chamar o endpoint uma vez por lote,
-  // cada chamada curta o bastante pra nunca chegar perto do limite deles.
-  const TAMANHO_LOTE = 20;
-  const ids = (STATE.assets||[]).filter(a=>!a.manual).map(a=>a.id);
-  const lotes = [];
-  for(let i=0;i<ids.length;i+=TAMANHO_LOTE) lotes.push(ids.slice(i,i+TAMANHO_LOTE));
-  if(lotes.length===0) lotes.push([]);  // carteira vazia — ainda faz 1 chamada (comportamento antigo)
+  st.innerHTML='<span class="spin">⟳</span> atualizando...';
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/refresh', {method:'POST'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+  }catch(e){
+    b.disabled=false;
+    st.innerHTML='<span style="color:var(--red)">⚠ falhou ao iniciar, tente de novo</span>';
+    setTimeout(()=>{ if(st.textContent.includes('falhou')) st.textContent=''; }, 6000);
+    return;
+  }
+  await acompanharRefresh();
+}
 
-  // Um lote falhar (502 passageiro, por exemplo) não pode travar os demais — antes um
-  // "break" aqui parava tudo no meio, deixando os lotes seguintes sem nem ser tentados
-  // (sintoma relatado: "funcionou pra alguns ativos, não pra todos"). Cada lote agora
-  // tem 1 nova tentativa automática antes de desistir dele, e os outros lotes continuam
-  // rodando mesmo se um deles falhar de vez.
-  let lotesComFalha = 0;
-  for(let i=0;i<lotes.length;i++){
-    if(lotes.length>1) st.innerHTML=`<span class="spin">⟳</span> atualizando lote ${i+1}/${lotes.length}...`;
-    else st.innerHTML='<span class="spin">⟳</span> atualizando...';
-    let ok = false;
-    for(let tentativa=0; tentativa<2 && !ok; tentativa++){
-      try{
-        const r = await fetch('/api/carteira/'+CID+'/refresh',{method:'POST',
-          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: lotes[i]})});
-        // fetch só rejeita em falha de rede — um 502/504 chega aqui como resposta "normal" e
-        // passava batido, mostrando "atualizado" mesmo quando nada foi atualizado de verdade.
-        if(!r.ok) throw new Error('HTTP '+r.status);
-        ok = true;
-      }catch(e){ /* tenta de novo (até o limite acima) */ }
+async function acompanharRefresh(){
+  const b=document.getElementById('btnRefresh'), st=document.getElementById('status');
+  while(true){
+    await new Promise(res=>setTimeout(res, 1200));
+    let d;
+    try{
+      const r = await fetch('/api/carteira/'+CID+'/refresh/status');
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      d = await r.json();
+    }catch(e){
+      b.disabled=false;
+      st.innerHTML='<span style="color:var(--red)">⚠ perdi a conexão acompanhando, tente de novo</span>';
+      setTimeout(()=>{ if(st.textContent.includes('perdi')) st.textContent=''; }, 7000);
+      return;
     }
-    if(!ok) lotesComFalha++;
+    if(d.total>0) st.innerHTML=`<span class="spin">⟳</span> atualizando ${d.feito}/${d.total}...`;
+    if(!d.rodando){
+      b.disabled=false;
+      if(d.erro){
+        st.innerHTML=`<span style="color:var(--red)">⚠ ${d.erro}</span>`;
+        setTimeout(()=>{ if(st.textContent.includes('⚠')) st.textContent=''; }, 7000);
+      }else{
+        st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
+      }
+      await load();
+      return;
+    }
   }
-  b.disabled=false;
-  if(lotesComFalha>0){
-    st.innerHTML=`<span style="color:var(--red)">⚠ ${lotesComFalha} de ${lotes.length} lote(s) falharam, tente de novo</span>`;
-    setTimeout(()=>{ if(st.textContent.includes('falh')) st.textContent=''; }, 7000);
-  }else{
-    st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
-  }
-  await load();
 }
 
 fillSelectClasse(document.getElementById('newClasse'), '');

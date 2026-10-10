@@ -16,6 +16,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 
 import requests
@@ -888,13 +889,37 @@ def _rodar_refresh_em_background(cid, pares, moeda):
     with app.app_context():
         try:
             respostas = {}
-            with ThreadPoolExecutor(max_workers=24) as ex:
-                futuros = {ex.submit(fetch_quote, ticker, moeda): aid for aid, ticker in pares}
-                for fut in as_completed(futuros):
+            # Não uso "with ThreadPoolExecutor(...) as ex" aqui de propósito: o __exit__ do
+            # context manager chama shutdown(wait=True), que BLOQUEIA até toda tarefa
+            # terminar — inclusive uma que tenha travado. Isso anularia o teto de 120s logo
+            # abaixo (pegaríamos o timeout, mas ainda ficaríamos presos aqui esperando).
+            ex = ThreadPoolExecutor(max_workers=24)
+            futuros = {ex.submit(fetch_quote, ticker, moeda): aid for aid, ticker in pares}
+            try:
+                # teto pro conjunto inteiro — sem isso, se o yfinance travar numa cotação
+                # (sem garantia de timeout interno), o job fica "rodando" pra sempre e a
+                # tela trava em "atualizando X/Y..." até reiniciar o processo. Com o teto,
+                # na pior das hipóteses o usuário espera 2min e vê o que deu tempo de buscar.
+                for fut in as_completed(futuros, timeout=120):
                     aid = futuros[fut]
-                    respostas[aid] = fut.result()
+                    try:
+                        respostas[aid] = fut.result()
+                    except Exception as e:  # noqa: BLE001 — uma cotação falhar não derruba o resto
+                        respostas[aid] = {"preco": None, "vpa": None, "pvp": None,
+                                           "dy": None, "erro": str(e)}
                     with _REFRESH_LOCK:
                         _REFRESH_JOBS[cid]["feito"] += 1
+            except FuturesTimeoutError:
+                with _REFRESH_LOCK:
+                    j = _REFRESH_JOBS[cid]
+                    pendentes = j["total"] - j["feito"]
+                    j["erro"] = (f"{pendentes} cotação(ões) demoraram demais e foram "
+                                 "puladas — clique em Atualizar de novo pra tentar essas.")
+            finally:
+                # não espera as tarefas presas morrerem (cancel_futures só cancela as que
+                # nem começaram) — a thread travada vira órfã e morre sozinha depois,
+                # sem segurar nosso job
+                ex.shutdown(wait=False, cancel_futures=True)
             for aid, q in respostas.items():
                 a = db.session.get(Asset, aid)
                 if a and q["preco"]:

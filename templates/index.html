@@ -315,9 +315,24 @@ async function novaCarteira(){
 
 async function load(){
   if(!CID){ renderTudo(); return; }
-  const r = await fetch('/api/carteira/'+CID+'/state');
-  if(!r.ok){ return; }
-  STATE = await r.json();
+  // Antes, uma falha aqui (rede, 5xx, sessão expirada) só dava "return" calado — a tela
+  // ficava com os dados antigos e NENHUM aviso, dando a impressão de que a ação que acabou
+  // de rodar (atualizar cotações, excluir, editar...) "não funcionou", quando na verdade só
+  // essa recarga final é que não voltou. Tenta 2 vezes antes de avisar de verdade.
+  let dados = null;
+  for(let tentativa=0; tentativa<2 && !dados; tentativa++){
+    try{
+      const r = await fetch('/api/carteira/'+CID+'/state');
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      dados = await r.json();
+    }catch(e){ /* tenta de novo (até o limite acima) */ }
+  }
+  if(!dados){
+    const st = document.getElementById('status');
+    if(st) st.innerHTML = '<span style="color:var(--red)">⚠ não consegui recarregar a tabela — atualize a página (F5)</span>';
+    return;
+  }
+  STATE = dados;
   EDIT = STATE.carteira.editavel;
   MOEDA = STATE.carteira.moeda || 'BRL';
   document.getElementById('selMoeda').value = MOEDA;

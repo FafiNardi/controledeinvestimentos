@@ -131,12 +131,14 @@
           <th>Preço atual</th>
           <th>Cotas que você tem</th>
           <th>Dividendo mensal (méd. 12m)</th>
+          <th title="Cotas que você tem × dividendo mensal médio — quanto essa posição já está rendendo por mês, hoje">Ganho mensal estimado</th>
           <th>Número mágico</th>
           <th>Faltam</th>
           <th>Investir hoje</th>
           <th></th>
         </tr></thead>
         <tbody id="tbodyMagico"></tbody>
+        <tfoot id="tfootMagico"></tfoot>
       </table>
     </div>
   </div>
@@ -193,10 +195,13 @@ function numeroMagico(preco, divMensal){
 function render(){
   const ativos = DATA.ativos || [];
   const tb = document.getElementById('tbodyMagico');
+  const tf = document.getElementById('tfootMagico');
   if(!ativos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="9">Nenhum FII encontrado nessa carteira. Classifique o ativo como "FII" ou "FII Infra" na aba Rebalanceamento pra ele aparecer aqui.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhum FII encontrado nessa carteira. Classifique o ativo como "FII" ou "FII Infra" na aba Rebalanceamento pra ele aparecer aqui.</td></tr>`;
+    tf.innerHTML = '';
     return;
   }
+  let ganhoMensalTotal = 0;
   tb.innerHTML = ativos.map(a=>{
     const divMensal = a.dividendos_12m!=null ? a.dividendos_12m/12 : null;
     const nm = numeroMagico(a.preco, divMensal);
@@ -204,6 +209,10 @@ function render(){
     // quando o ativo já bateu o número mágico (o "excedente" não é um valor a investir)
     const faltam = nm!=null ? Math.max(0, nm - (a.num_acoes||0)) : null;
     const investirHoje = faltam!=null ? faltam * (a.preco||0) : null;
+    // ganho mensal estimado = cotas que você já tem × dividendo mensal médio — é uma
+    // ESTIMATIVA (usa a média de 12m, o pagamento real do mês pode variar)
+    const ganhoMensal = (divMensal!=null && a.num_acoes) ? divMensal * a.num_acoes : null;
+    if(ganhoMensal) ganhoMensalTotal += ganhoMensal;
     let badge = `<span class="badge sem-dados">busque o dividendo</span>`;
     if(nm!=null){
       badge = faltam<=0 ? `<span class="badge ok">✓ já bate</span>` : `<span class="badge falta">faltam ${faltam}</span>`;
@@ -214,6 +223,7 @@ function render(){
       <td>${BRL(a.preco)}</td>
       <td>${(a.num_acoes||0).toLocaleString('pt-BR')}</td>
       <td>${divMensal!=null?BRL(divMensal):'—'}</td>
+      <td>${ganhoMensal!=null?BRL(ganhoMensal):'—'}</td>
       <td>${nm!=null?nm.toLocaleString('pt-BR'):'—'}</td>
       <td>${faltam!=null?faltam.toLocaleString('pt-BR'):'—'}</td>
       <td>${investirHoje!=null?BRL(investirHoje):'—'}</td>
@@ -225,6 +235,11 @@ function render(){
       </td>
     </tr>`;
   }).join('');
+  tf.innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--line)">
+    <td colspan="5">Total mensal estimado (soma de todos os FIIs acima)</td>
+    <td>${BRL(ganhoMensalTotal)}</td>
+    <td colspan="4"></td>
+  </tr>`;
 }
 
 // faz a busca de verdade (sem mexer em nenhum status na tela) — usado tanto pelo botão

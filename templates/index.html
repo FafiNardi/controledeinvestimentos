@@ -652,19 +652,29 @@ async function refresh(){
   const b=document.getElementById('btnRefresh'), st=document.getElementById('status');
   b.disabled=true;
   st.innerHTML='<span class="spin">⟳</span> atualizando...';
+  let totalEsperado = 0;
   try{
     const r = await fetch('/api/carteira/'+CID+'/refresh', {method:'POST'});
     if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    totalEsperado = d.total || 0;
   }catch(e){
     b.disabled=false;
     st.innerHTML='<span style="color:var(--red)">⚠ falhou ao iniciar, tente de novo</span>';
     setTimeout(()=>{ if(st.textContent.includes('falhou')) st.textContent=''; }, 6000);
     return;
   }
-  await acompanharRefresh();
+  await acompanharRefresh(totalEsperado);
 }
 
-async function acompanharRefresh(){
+// totalEsperado vem do POST que iniciou o job — guardado aqui porque o processo do servidor
+// pode reiniciar no meio (deploy, reinício da Render) e perder esse job da memória sem
+// avisar: a próxima chamada de /refresh/status voltaria com "rodando:false" por padrão
+// (nenhum job novo, "nada rodando" é o estado natural), e sem essa comparação a tela
+// mostraria "atualizado" como se tivesse dado tudo certo, quando na verdade a busca morreu
+// no meio e nenhuma cotação nova foi salva — exatamente o "mostrou atualizado mas os
+// preços continuaram os mesmos" que o Rafael relatou.
+async function acompanharRefresh(totalEsperado){
   const b=document.getElementById('btnRefresh'), st=document.getElementById('status');
   while(true){
     await new Promise(res=>setTimeout(res, 1200));
@@ -685,6 +695,13 @@ async function acompanharRefresh(){
       if(d.erro){
         st.innerHTML=`<span style="color:var(--red)">⚠ ${d.erro}</span>`;
         setTimeout(()=>{ if(st.textContent.includes('⚠')) st.textContent=''; }, 7000);
+      }else if(totalEsperado>0 && d.feito<totalEsperado){
+        // "rodando:false" sem erro normalmente é sucesso — MAS se o servidor reiniciou no
+        // meio (deploy, reinício da Render), a memória do job se perde e esse mesmo estado
+        // "nada rodando" vira o padrão de qualquer carteira sem job nenhum. Sem checar isso,
+        // a tela diria "atualizado" com a busca real morta no meio do caminho.
+        st.innerHTML=`<span style="color:var(--red)">⚠ a atualização foi interrompida (só ${d.feito} de ${totalEsperado} concluídos) — provavelmente o servidor reiniciou no meio, tente de novo</span>`;
+        setTimeout(()=>{ if(st.textContent.includes('interrompida')) st.textContent=''; }, 9000);
       }else{
         st.textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');
       }

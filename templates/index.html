@@ -89,8 +89,14 @@
   th .arr{color:var(--accent);font-size:10px}
   /* alça de arrastar na borda direita de cada cabeçalho — arrasta pra redimensionar a
      coluna inteira (via <colgroup>). position:sticky no th já cria um bloco de referência
-     pra essa alça absoluta, não precisa de position:relative extra */
-  .col-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;
+     pra essa alça absoluta, não precisa de position:relative extra. Fica TODA dentro do
+     próprio <th> (right:0, sem esticar pra fora dele) de propósito — um "right:-4px"
+     fazia a metade da alça invadir o <th> vizinho, e como os dois têm o mesmo z-index
+     (são irmãos, cada um com seu próprio contexto de empilhamento por causa do
+     position:sticky), o vizinho — por vir depois no HTML — ganhava o clique nessa faixa
+     invadida. Na prática a alça respondia só na metade esquerda, bem mais estreita do
+     que os 8px sugeriam, por isso era tão difícil de acertar com o mouse de verdade. */
+  .col-resizer{position:absolute;top:0;right:0;width:10px;height:100%;cursor:col-resize;
                z-index:3}
   .col-resizer:hover,.col-resizer.resizing{background:var(--accent);opacity:.5}
   .pct-cell{width:64px}

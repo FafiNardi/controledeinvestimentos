@@ -180,8 +180,11 @@
     <div class="topbar-spacer"></div>
     <span class="muted" id="linkOcultos" style="font-size:11.5px;cursor:pointer;text-decoration:underline;display:none"
       onclick="toggleOcultos()"></span>
+    <button class="ghost" id="btnCalcularTudo" onclick="calcularTudo()"
+      title="Busca no Investidor10 e recalcula o preço teto de todos os ativos da lista, um por um">⚡ Calcular tudo</button>
     <button class="ghost" id="btnLimparTabela" onclick="limparTabela()" title="Esconde todos os ativos da lista (não apaga nada do Rebalanceamento — dá pra reexibir um por um depois)">🧹 Limpar tabela</button>
   </div>
+  <div id="statusCalcularTudo" class="muted" style="font-size:11.5px;display:none;padding:0 0 10px"></div>
   <div id="painelOcultos" style="display:none;margin-bottom:10px"></div>
   <div class="ledger">
     <div class="tbl-scroll limitado">
@@ -249,23 +252,32 @@ async function load(){
   MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
     `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
+  document.getElementById('btnCalcularTudo').style.display = EDIT ? '' : 'none';
   renderTudo();
 }
 
 // ---------------------------------------------------------------- cálculos
 
-// 6% é o padrão do próprio método (Barsi/Bazin) — igual ao que já aparece pré-preenchido no
-// campo de yield mínimo, então o cálculo tem que respeitar esse padrão mesmo se o usuário
-// nunca tiver tocado nesse campo especificamente (só editado o campo de dividendos ao lado)
-function tetoBazin(dados){
+function isFII(classe){ return (classe||'').toLowerCase().includes('fii'); }
+function isFIIDePapel(classe, segmento){ return isFII(classe) && (segmento||'').trim().toLowerCase()==='papel'; }
+// Yield mínimo padrão: 6% é o do método em si (Barsi/Bazin), mas FII pede mais disciplina de
+// yield do que ação (12%) — o cálculo tem que respeitar esse padrão por classe mesmo se o
+// usuário nunca tiver tocado nesse campo especificamente (só editado dividendos ao lado)
+function yieldPadrao(classe){ return isFII(classe) ? 12 : 6; }
+// Fator de ágio padrão do Teto Patrimonial: 1,0x pra FII de tijolo (nunca acima do
+// patrimônio), mas um FII DE PAPEL que já está no próprio teto patrimonial não vale mais a
+// pena comprar — então o padrão pra ele é 0,95x (teto sempre um pouco abaixo do VPA)
+function fatorAgioPadrao(classe, segmento){ return isFIIDePapel(classe, segmento) ? 0.95 : 1; }
+
+function tetoBazin(dados, classe){
   const div12 = dados.dividendos_12m || 0;
-  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : 6;
+  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : yieldPadrao(classe);
   if(!div12 || !yield_) return null;
   return div12 / (yield_/100);
 }
-function tetoBarsi(dados){
+function tetoBarsi(dados, classe){
   const div60 = dados.dividendos_60m || 0;
-  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : 6;
+  const yield_ = dados.yield_minimo != null ? dados.yield_minimo : yieldPadrao(classe);
   if(!div60 || !yield_) return null;
   const mediaAnual = div60 / 5;
   return mediaAnual / (yield_/100);
@@ -330,10 +342,10 @@ function tetoGraham(dados){
 // imóveis — pagar acima disso é apostar que o mercado vale mais que os imóveis avaliados.
 // Fator de ágio máximo editável (padrão 1,0x = nunca pagar acima do patrimônio; um FII de
 // papel/recebíveis com boa gestão às vezes justifica um fator um pouco acima de 1).
-function tetoPatrimonial(dados){
+function tetoPatrimonial(dados, classe, segmento){
   const vpa = dados.vpa || 0;
   if(vpa <= 0) return null;
-  const fatorAgio = dados.fator_agio != null ? dados.fator_agio : 1;
+  const fatorAgio = dados.fator_agio != null ? dados.fator_agio : fatorAgioPadrao(classe, segmento);
   return vpa * fatorAgio;
 }
 function distancia(teto, precoAtual){
@@ -393,12 +405,12 @@ function botaoBuscarMacro(a){
 
 function tetosDoAtivo(a){
   return {
-    bazin: tetoBazin(a.premissas.bazin||{}),
-    barsi: tetoBarsi(a.premissas.barsi||{}),
+    bazin: tetoBazin(a.premissas.bazin||{}, a.classe),
+    barsi: tetoBarsi(a.premissas.barsi||{}, a.classe),
     fluxo_descontado: tetoFluxoDescontado(a.premissas.fluxo_descontado||{}),
     cresc5: tetoCrescimentoHistorico(a.premissas.cresc5||{}),
     graham: tetoGraham(a.premissas.graham||{}),
-    patrimonial: tetoPatrimonial(a.premissas.patrimonial||{}),
+    patrimonial: tetoPatrimonial(a.premissas.patrimonial||{}, a.classe, a.segmento),
   };
 }
 
@@ -554,16 +566,22 @@ function renderEditor(){
   const d = a.premissas[METODO_EDITANDO] || {};
 
   const camposPorMetodo = {
-    bazin: ()=>`
+    bazin: ()=>{
+      const yp = yieldPadrao(a.classe);
+      return `
       <div class="editor-field"><label>Dividendos 12m<span class="ajuda" title="Total pago em dinheiro por ação nos últimos 12 meses">?</span></label>${inputPremissa(a.id,'bazin','dividendos_12m',d.dividendos_12m,dis)}
         <span class="hint">Total pago por ação nos últimos 12 meses</span></div>
-      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'bazin','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}
-        <span class="hint">Retorno mínimo em dividendos que você exige — padrão 6%</span></div>`,
-    barsi: ()=>`
+      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'bazin','yield_minimo',d.yield_minimo!=null?d.yield_minimo:yp,dis)}
+        <span class="hint">Retorno mínimo em dividendos que você exige — padrão ${yp}%${isFII(a.classe)?' (FII)':''}</span></div>`;
+    },
+    barsi: ()=>{
+      const yp = yieldPadrao(a.classe);
+      return `
       <div class="editor-field"><label>Soma dividendos 60m<span class="ajuda" title="Soma (não a média) de tudo pago em 5 anos">?</span></label>${inputPremissa(a.id,'barsi','dividendos_60m',d.dividendos_60m,dis)}
         <span class="hint">Soma de tudo pago por ação nos últimos 5 anos (a conta já divide por 5 pra achar a média anual)</span></div>
-      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:6,dis)}
-        <span class="hint">Retorno mínimo em dividendos que você exige — padrão 6%</span></div>`,
+      <div class="editor-field"><label>Yield mín.<span class="ajuda" title="Retorno mínimo em dividendos que você exige">?</span></label>${inputPremissa(a.id,'barsi','yield_minimo',d.yield_minimo!=null?d.yield_minimo:yp,dis)}
+        <span class="hint">Retorno mínimo em dividendos que você exige — padrão ${yp}%${isFII(a.classe)?' (FII)':''}</span></div>`;
+    },
     fluxo_descontado: ()=>`
       <div class="editor-field"><label>Fluxo atual<span class="ajuda" title="LPA (ações) ou dividendo/cota (FIIs)">?</span></label>${inputPremissa(a.id,'fluxo_descontado','fluxo_atual',d.fluxo_atual,dis)}
         <span class="hint">LPA (ações) ou dividendo/cota (FIIs)</span></div>
@@ -601,14 +619,22 @@ function renderEditor(){
         <span class="hint">Valor patrimonial por ação (patrimônio líquido ÷ nº de ações)</span></div>
       <div class="editor-field"><label>Margem segur.<span class="ajuda" title="Desconto sobre o preço justo, pra folga extra">?</span></label>${inputPremissa(a.id,'graham','margem_seguranca',d.margem_seguranca!=null?d.margem_seguranca:0,dis)}
         <span class="hint">Desconto sobre o preço justo calculado — padrão 0% (fórmula original)</span></div>`,
-    patrimonial: ()=>`
+    patrimonial: ()=>{
+      const fp = fatorAgioPadrao(a.classe, a.segmento);
+      const fpTxt = fp.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      return `
       <div class="editor-field"><label>VPA<span class="ajuda" title="Valor Patrimonial por Cota">?</span></label>${inputPremissa(a.id,'patrimonial','vpa',d.vpa,dis)}
         <span class="hint">Valor patrimonial por cota (patrimônio do fundo ÷ nº de cotas)</span></div>
-      <div class="editor-field"><label>Fator ágio máx.<span class="ajuda" title="Múltiplo do VPA que você aceita pagar — 1,0 = nunca pagar acima do patrimônio">?</span></label>${inputPremissa(a.id,'patrimonial','fator_agio',d.fator_agio!=null?d.fator_agio:1,dis)}
-        <span class="hint">Múltiplo do VPA que você aceita pagar — padrão 1,0 (nunca acima do patrimônio)</span></div>`,
+      <div class="editor-field"><label>Fator ágio máx.<span class="ajuda" title="Múltiplo do VPA que você aceita pagar — 1,0 = nunca pagar acima do patrimônio">?</span></label>${inputPremissa(a.id,'patrimonial','fator_agio',d.fator_agio!=null?d.fator_agio:fp,dis)}
+        <span class="hint">Múltiplo do VPA que você aceita pagar — padrão ${fpTxt}${isFIIDePapel(a.classe,a.segmento)?' (FII de papel: não vale a pena comprar já no teto patrimonial)':' (nunca acima do patrimônio)'}</span></div>`;
+    },
   };
 
-  const funcTeto = {bazin:tetoBazin, barsi:tetoBarsi, fluxo_descontado:tetoFluxoDescontado, cresc5:tetoCrescimentoHistorico, graham:tetoGraham, patrimonial:tetoPatrimonial}[METODO_EDITANDO];
+  const funcTeto = {
+    bazin: dd=>tetoBazin(dd, a.classe), barsi: dd=>tetoBarsi(dd, a.classe),
+    fluxo_descontado: tetoFluxoDescontado, cresc5: tetoCrescimentoHistorico, graham: tetoGraham,
+    patrimonial: dd=>tetoPatrimonial(dd, a.classe, a.segmento),
+  }[METODO_EDITANDO];
   const teto = funcTeto(d);
   const dist = distancia(teto, a.preco);
 
@@ -662,22 +688,25 @@ async function buscarMacroFluxoDescontado(assetId){
   }
 }
 
-async function buscarDadosInvestidor10(assetId, ticker){
-  const st = document.getElementById('statusBusca'+assetId);
-  st.textContent = 'buscando...';
+// Núcleo da busca de dados no Investidor10 pra um único ativo: preenche as premissas de
+// todos os métodos que dá pra preencher automaticamente e salva cada uma na hora. Compartilhado
+// entre o botão 🔄 de um ativo só (no editor) e o "⚡ Calcular tudo" (que chama isso em loop,
+// um ativo de cada vez — nada de paralelismo aqui, é a mesma lição da aba Rebalanceamento:
+// várias buscas no Investidor10 ao mesmo tempo sobrecarregam o servidor gratuito).
+async function buscarDadosParaAsset(a, onStatus){
+  const status = onStatus || (()=>{});
   try{
-    const r = await fetch('/api/investidor10/'+encodeURIComponent(ticker));
+    status('buscando...');
+    const r = await fetch('/api/investidor10/'+encodeURIComponent(a.ticker));
     const d = await r.json();
-    if(d.erro && !d.preco){ st.textContent = '⚠ não achei'; setTimeout(()=>st.textContent='',4000); return; }
-    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
-    if(!a) return;
+    if(d.erro && !d.preco){ status('⚠ não achei'); return false; }
     // preenche o Bazin com os dividendos de 12 meses achados — é exatamente o dado que
     // esse método pede
     if(d.dividendos_12m){
       a.premissas.bazin = a.premissas.bazin || {};
       a.premissas.bazin.dividendos_12m = d.dividendos_12m;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({asset_id:assetId, metodo:'bazin', dados:a.premissas.bazin})});
+        body: JSON.stringify({asset_id:a.id, metodo:'bazin', dados:a.premissas.bazin})});
     }
     // Barsi pede a soma de 60 meses — soma o valor de cada pagamento da tabela de histórico
     // de proventos do Investidor10 cuja data caiu nos últimos 5 anos
@@ -685,7 +714,7 @@ async function buscarDadosInvestidor10(assetId, ticker){
       a.premissas.barsi = a.premissas.barsi || {};
       a.premissas.barsi.dividendos_60m = d.dividendos_60m;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({asset_id:assetId, metodo:'barsi', dados:a.premissas.barsi})});
+        body: JSON.stringify({asset_id:a.id, metodo:'barsi', dados:a.premissas.barsi})});
     }
     // LPA vira o "fluxo atual" do método de fluxo descontado (é o mesmo número, só que lá
     // ele é genérico pra também aceitar dividendo/cota manual no caso de FIIs)
@@ -693,7 +722,7 @@ async function buscarDadosInvestidor10(assetId, ticker){
       const fluxo = {...(a.premissas.fluxo_descontado||{}), fluxo_atual:d.lpa||0, roe:d.roe||0, payout:d.payout||0};
       a.premissas.fluxo_descontado = fluxo;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
+        body: JSON.stringify({asset_id:a.id, metodo:'fluxo_descontado', dados:fluxo})});
     }
     // Graham usa LPA (já buscado acima) + VPA — os dois já vêm prontos do Investidor10,
     // sem precisar de nenhuma conta extra
@@ -701,25 +730,25 @@ async function buscarDadosInvestidor10(assetId, ticker){
       const graham = {...(a.premissas.graham||{}), lpa:d.lpa||0, vpa:d.vpa||0};
       a.premissas.graham = graham;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({asset_id:assetId, metodo:'graham', dados:graham})});
+        body: JSON.stringify({asset_id:a.id, metodo:'graham', dados:graham})});
     }
     // Teto Patrimonial usa só o VPA — mesmo dado que o Graham já buscou
     if(d.vpa){
       const patrimonial = {...(a.premissas.patrimonial||{}), vpa:d.vpa||0};
       a.premissas.patrimonial = patrimonial;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({asset_id:assetId, metodo:'patrimonial', dados:patrimonial})});
+        body: JSON.stringify({asset_id:a.id, metodo:'patrimonial', dados:patrimonial})});
     }
     if(d.preco){
-      await fetch('/api/assets/'+assetId,{method:'PUT',headers:{'Content-Type':'application/json'},
+      await fetch('/api/assets/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({preco:d.preco})});
       a.preco = d.preco;
     }
     // histórico de 5 anos pro método "Crescimento Histórico" — pedido separado, então uma
     // segunda chamada (mais lenta, o Investidor10 precisa achar o ID interno do ativo antes)
-    st.textContent = 'buscando histórico...';
+    status('buscando histórico...');
     try{
-      const rh = await fetch('/api/investidor10-historico/'+encodeURIComponent(ticker));
+      const rh = await fetch('/api/investidor10-historico/'+encodeURIComponent(a.ticker));
       const dh = await rh.json();
       if(dh.crescimento_lucro!=null || dh.crescimento_roe!=null){
         const cresc5 = {...(a.premissas.cresc5||{}), dividendos_12m:d.dividendos_12m||0,
@@ -727,16 +756,51 @@ async function buscarDadosInvestidor10(assetId, ticker){
           dividendos_consistentes: dh.dividendos_consistentes ? 1 : 0};
         a.premissas.cresc5 = cresc5;
         await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({asset_id:assetId, metodo:'cresc5', dados:cresc5})});
+          body: JSON.stringify({asset_id:a.id, metodo:'cresc5', dados:cresc5})});
       }
     } catch(e){ /* histórico é bônus — se falhar, segue com o resto que já buscou */ }
-    st.textContent = '✓ atualizado';
-    setTimeout(()=>{ if(st.textContent.startsWith('✓')) st.textContent=''; }, 4000);
-    renderResumo(); renderEditor();
+    status('✓ atualizado');
+    return true;
   } catch(e){
-    st.textContent = '⚠ erro de rede';
-    setTimeout(()=>st.textContent='',4000);
+    status('⚠ erro de rede');
+    return false;
   }
+}
+
+async function buscarDadosInvestidor10(assetId, ticker){
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(!a) return;
+  const st = document.getElementById('statusBusca'+assetId);
+  const ok = await buscarDadosParaAsset(a, txt=>{ if(st) st.textContent = txt; });
+  if(st) setTimeout(()=>{ if(st.textContent===( ok ? '✓ atualizado' : st.textContent)) st.textContent=''; }, 4000);
+  renderResumo(); renderEditor();
+}
+
+let CALCULANDO_TUDO = false;
+async function calcularTudo(){
+  if(CALCULANDO_TUDO) return;
+  const alvos = (DATA.ativos||[]).filter(a=>!a.oculto);
+  if(!alvos.length){ alert('Nenhum ativo na lista pra calcular.'); return; }
+  if(!confirm(`Buscar dados no Investidor10 e recalcular o preço teto de ${alvos.length} ativo${alvos.length>1?'s':''}?\n\nIsso é feito um ativo de cada vez e pode demorar alguns minutos — não feche essa aba enquanto estiver rodando.`)) return;
+  CALCULANDO_TUDO = true;
+  const btn = document.getElementById('btnCalcularTudo');
+  const st = document.getElementById('statusCalcularTudo');
+  btn.disabled = true;
+  st.style.display = '';
+  let ok = 0, falha = 0;
+  for(let i=0;i<alvos.length;i++){
+    const a = alvos[i];
+    st.textContent = `⚡ Calculando ${i+1}/${alvos.length} — ${a.ticker}...`;
+    const sucesso = await buscarDadosParaAsset(a);
+    if(sucesso) ok++; else falha++;
+    renderResumo();
+  }
+  st.textContent = `✓ Concluído: ${ok} ativo${ok!==1?'s':''} atualizado${ok!==1?'s':''}` +
+    (falha ? `, ${falha} sem dado no Investidor10` : '');
+  setTimeout(()=>{ st.style.display = 'none'; }, 10000);
+  btn.disabled = false;
+  CALCULANDO_TUDO = false;
+  renderResumo(); renderEditor();
 }
 async function salvarPremissa(assetId, metodo, campo, valor){
   let s = String(valor).replace(/[^\d,.-]/g,'');

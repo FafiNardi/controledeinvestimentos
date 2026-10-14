@@ -1606,7 +1606,12 @@ def preco_teto():
 def api_preco_teto(cid):
     c = get_carteira_or_404(cid)
     require_owner(c)
-    assets = Asset.query.filter_by(carteira_id=cid).order_by(Asset.ordem, Asset.id).all()
+    # Renda Fixa (e tudo que caiu nessa classe na migração: Caixa/Tesouro Direto/Fundo de
+    # Investimento) não tem nenhum método de preço teto que faça sentido — nem aparece
+    # como "oculto", simplesmente nunca entra na lista dessa aba.
+    assets = (Asset.query.filter_by(carteira_id=cid)
+              .filter(db.func.lower(Asset.classe) != "renda fixa")
+              .order_by(Asset.ordem, Asset.id).all())
     asset_ids = [a.id for a in assets]
     premissas = PrecoTetoPremissa.query.filter(PrecoTetoPremissa.asset_id.in_(asset_ids)).all() \
         if asset_ids else []
@@ -1618,8 +1623,8 @@ def api_preco_teto(cid):
             dados = {}
         por_asset.setdefault(p.asset_id, {})[p.metodo] = dados
     ativos_out = [{
-        "id": a.id, "ticker": a.ticker, "classe": a.classe or "", "preco": a.preco or 0,
-        "num_acoes": a.num_acoes or 0, "premissas": por_asset.get(a.id, {}),
+        "id": a.id, "ticker": a.ticker, "classe": a.classe or "", "segmento": a.segmento or "",
+        "preco": a.preco or 0, "num_acoes": a.num_acoes or 0, "premissas": por_asset.get(a.id, {}),
         "oculto": bool(a.oculto_preco_teto),
     } for a in assets]
     return jsonify({

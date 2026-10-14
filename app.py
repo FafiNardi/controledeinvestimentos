@@ -928,6 +928,14 @@ def _rodar_refresh_em_background(cid, pares, moeda):
                     a.pvp = q["pvp"] or 0
                     a.dy = q["dy"] or 0
                     a.updated_at = datetime.now().isoformat(timespec="seconds")
+                    # achou cotação de verdade pra um ativo que tinha ficado marcado manual —
+                    # "manual" nesse app só deveria existir pra ativo que NÃO é ticker de bolsa
+                    # (Tesouro Direto, Fundo DI...); se a busca deu certo agora, ele é um ticker
+                    # de verdade e não devia ter ficado preso em manual pra sempre. Isso conserta
+                    # sozinho o caso de um ativo que falhou na busca só na hora de criar (ex.:
+                    # instabilidade passageira do provedor) e desde então nunca mais foi tocado
+                    # pelo "Atualizar cotações" (que antes pulava tudo que já era manual).
+                    a.manual = 0
             db.session.commit()
         except Exception as e:  # noqa: BLE001 — nunca pode deixar o job "rodando" pra sempre
             with _REFRESH_LOCK:
@@ -947,7 +955,11 @@ def api_refresh(cid):
         job_atual = _REFRESH_JOBS.get(cid)
         if job_atual and job_atual["rodando"]:
             return jsonify({"ok": True, **job_atual})
-        assets = Asset.query.filter_by(carteira_id=cid, manual=0).all()
+        # inclui os já marcados "manual" também — é a forma de recuperar sozinho um ticker de
+        # bolsa de verdade que ficou preso em manual por ter falhado a busca uma vez (ver
+        # comentário no final de _rodar_refresh_em_background). Pra quem é manual de verdade
+        # (Tesouro Direto etc.) a busca simplesmente não acha nada e nada muda, sem custo real.
+        assets = Asset.query.filter_by(carteira_id=cid).all()
         pares = [(a.id, a.ticker) for a in assets]
         if not pares:
             job = _job_vazio()

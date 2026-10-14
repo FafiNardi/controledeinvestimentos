@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
@@ -2033,12 +2034,34 @@ def backtest():
     return render_template("backtest.html", usuario=current_user.nome)
 
 
+# Buscar histórico de vários ativos (brapi.dev) + rodar 10 janelas de simulação, tudo numa
+# única requisição síncrona, passava fácil dos ~30s de teto do worker da Render gratuita e
+# a Render devolvia a própria página de erro HTML no meio do JSON (quebrando o fetch do
+# navegador) — exatamente o mesmo problema (e a mesma solução) do "Atualizar cotações" do
+# Rebalanceamento: o POST só anota "comece a simular" e devolve na hora; quem calcula de
+# verdade é uma thread em segundo plano, e o navegador acompanha via polling.
+_BACKTEST_LOCK = threading.Lock()
+_BACKTEST_JOBS = {}  # job_id -> {"rodando","resultado","erro","criado_em"}
+
+
+def _rodar_backtest_em_background(job_id, ativos, fundo_di_peso, reinveste):
+    with app.app_context():
+        try:
+            resultado = simular_backtest(ativos, fundo_di_peso, reinveste)
+            with _BACKTEST_LOCK:
+                _BACKTEST_JOBS[job_id].update(rodando=False, resultado=resultado, erro=None)
+        except Exception as e:  # noqa: BLE001
+            with _BACKTEST_LOCK:
+                _BACKTEST_JOBS[job_id].update(rodando=False, resultado=None, erro=str(e))
+
+
 @app.route("/api/backtest/simular", methods=["POST"])
 @login_required
 def api_backtest_simular():
-    """Simula uma carteira hipotética (buy and hold) contra CDI e Ibovespa em janelas
-    de 1 a 10 anos. Não depende de nenhuma carteira real — é só uma lista de tickers
-    digitada na hora, por isso não tem carteira_id nem checagem de dono."""
+    """Dispara a simulação em segundo plano e devolve na hora um job_id — o resultado de
+    verdade vem depois, via polling em /api/backtest/status/<job_id>. Não depende de
+    nenhuma carteira real — é só uma lista de tickers digitada na hora, por isso não tem
+    carteira_id nem checagem de dono."""
     data = request.get_json(force=True)
     ativos_in = data.get("ativos") or []
     fundo_di_peso = float(data.get("fundo_di_peso") or 0)
@@ -2063,8 +2086,25 @@ def api_backtest_simular():
     if abs(soma_pesos - 100) > 0.5:
         return jsonify({"erro": f"os pesos somam {soma_pesos:.1f}%, mas precisam somar 100%"}), 400
 
-    resultado = simular_backtest(ativos, fundo_di_peso, reinveste)
-    return jsonify(resultado)
+    job_id = uuid.uuid4().hex
+    agora = time.time()
+    with _BACKTEST_LOCK:
+        # limpa jobs de mais de 1h — não tem usuário nenhum ainda olhando esse resultado
+        for jid in [j for j, v in _BACKTEST_JOBS.items() if agora - v["criado_em"] > 3600]:
+            del _BACKTEST_JOBS[jid]
+        _BACKTEST_JOBS[job_id] = {"rodando": True, "resultado": None, "erro": None, "criado_em": agora}
+    threading.Thread(target=_rodar_backtest_em_background,
+                      args=(job_id, ativos, fundo_di_peso, reinveste), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/backtest/status/<job_id>")
+@login_required
+def api_backtest_status(job_id):
+    job = _BACKTEST_JOBS.get(job_id)
+    if not job:
+        return jsonify({"erro": "simulação não encontrada (expirou ou o processo reiniciou)"}), 404
+    return jsonify({"rodando": job["rodando"], "resultado": job["resultado"], "erro": job["erro"]})
 
 
 @app.route("/api/carteira/<int:cid>/preco-teto")

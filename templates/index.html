@@ -228,7 +228,7 @@
         <td></td>
         <td id="totalFalta" class="muted" style="font-weight:600"></td>
         <td></td>
-        <td><button id="btnAddAsset" onclick="addAsset()">Adicionar</button>
+        <td colspan="2" style="padding-left:2px;padding-right:2px"><button id="btnAddAsset" style="padding:8px 8px" onclick="addAsset()">Adicionar</button>
           <span id="statusAdd" class="muted" style="margin-left:6px"></span></td>
       </tr>
     </tfoot>
@@ -421,7 +421,7 @@ function renderRows(){
   tb.innerHTML = dados.map(a=>{
     const buy = a.decisao==='Comprar';
     return `<tr data-id="${a.id}">
-      <td><span class="tick">${a.ticker}</span>${a.manual?' <span class="muted">✎</span>':''}</td>
+      <td><span class="tick">${a.ticker}</span></td>
       <td>${a.manual
             ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="${MOEDA==='USD'?'US$ 0,00':'R$ 0,00'}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',smartNum(this.value))">`
             : (a.preco ? BRL(a.preco)

@@ -888,12 +888,14 @@ def _rodar_refresh_em_background(cid, pares, moeda):
     Com app.app_context() cria um contexto (e portanto uma sessão) novo, só dessa thread."""
     with app.app_context():
         try:
-            respostas = {}
-            # Não uso "with ThreadPoolExecutor(...) as ex" aqui de propósito: o __exit__ do
-            # context manager chama shutdown(wait=True), que BLOQUEIA até toda tarefa
-            # terminar — inclusive uma que tenha travado. Isso anularia o teto de 120s logo
-            # abaixo (pegaríamos o timeout, mas ainda ficaríamos presos aqui esperando).
-            ex = ThreadPoolExecutor(max_workers=24)
+            # 24 workers em paralelo (valor original) já derrubou o processo mais de uma vez
+            # na Render gratuita: cada busca carrega uma página HTML de ~2MB do Investidor10 e
+            # faz regex em cima — com 24 delas ao mesmo tempo, o pico de memória/CPU é alto
+            # demais pro plano free (visto nos logs: "WORKER TIMEOUT" e até um "SIGKILL!
+            # Perhaps out of memory"). 6 é bem mais gentil com o processo; o preço é a busca
+            # inteira demorar mais (mais "rodadas"), mas ainda fica bem abaixo do teto de 120s
+            # mesmo pra carteiras grandes (50 ativos / 6 workers ~= 9 rodadas).
+            ex = ThreadPoolExecutor(max_workers=6)
             futuros = {ex.submit(fetch_quote, ticker, moeda): aid for aid, ticker in pares}
             try:
                 # teto pro conjunto inteiro — sem isso, se o yfinance travar numa cotação
@@ -903,10 +905,31 @@ def _rodar_refresh_em_background(cid, pares, moeda):
                 for fut in as_completed(futuros, timeout=120):
                     aid = futuros[fut]
                     try:
-                        respostas[aid] = fut.result()
+                        q = fut.result()
                     except Exception as e:  # noqa: BLE001 — uma cotação falhar não derruba o resto
-                        respostas[aid] = {"preco": None, "vpa": None, "pvp": None,
-                                           "dy": None, "erro": str(e)}
+                        q = {"preco": None, "vpa": None, "pvp": None, "dy": None, "erro": str(e)}
+                    # grava e comita CADA resultado na hora, em vez de guardar tudo num dict e
+                    # só escrever no final — se o processo morrer no meio (o motivo de tudo
+                    # isso existir: viu-se nos logs da Render o worker sendo morto à força no
+                    # meio de um refresh), o que já tinha sido buscado com sucesso até aquele
+                    # ponto fica salvo, em vez de se perder junto com o resto.
+                    a = db.session.get(Asset, aid)
+                    if a and q["preco"]:
+                        a.preco = q["preco"]
+                        a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)
+                        a.pvp = q["pvp"] or 0
+                        a.dy = q["dy"] or 0
+                        a.updated_at = datetime.now().isoformat(timespec="seconds")
+                        # achou cotação de verdade pra um ativo que tinha ficado marcado manual
+                        # — "manual" nesse app só deveria existir pra ativo que NÃO é ticker de
+                        # bolsa (Tesouro Direto, Fundo DI...); se a busca deu certo agora, ele é
+                        # um ticker de verdade e não devia ter ficado preso em manual pra
+                        # sempre. Isso conserta sozinho o caso de um ativo que falhou na busca
+                        # só na hora de criar (ex.: instabilidade passageira do provedor) e
+                        # desde então nunca mais foi tocado pelo "Atualizar cotações" (que antes
+                        # pulava tudo que já era manual).
+                        a.manual = 0
+                        db.session.commit()
                     with _REFRESH_LOCK:
                         _REFRESH_JOBS[cid]["feito"] += 1
             except FuturesTimeoutError:
@@ -920,23 +943,6 @@ def _rodar_refresh_em_background(cid, pares, moeda):
                 # nem começaram) — a thread travada vira órfã e morre sozinha depois,
                 # sem segurar nosso job
                 ex.shutdown(wait=False, cancel_futures=True)
-            for aid, q in respostas.items():
-                a = db.session.get(Asset, aid)
-                if a and q["preco"]:
-                    a.preco = q["preco"]
-                    a.vpa = a.vpa if a.vpa_manual else (q["vpa"] or 0)
-                    a.pvp = q["pvp"] or 0
-                    a.dy = q["dy"] or 0
-                    a.updated_at = datetime.now().isoformat(timespec="seconds")
-                    # achou cotação de verdade pra um ativo que tinha ficado marcado manual —
-                    # "manual" nesse app só deveria existir pra ativo que NÃO é ticker de bolsa
-                    # (Tesouro Direto, Fundo DI...); se a busca deu certo agora, ele é um ticker
-                    # de verdade e não devia ter ficado preso em manual pra sempre. Isso conserta
-                    # sozinho o caso de um ativo que falhou na busca só na hora de criar (ex.:
-                    # instabilidade passageira do provedor) e desde então nunca mais foi tocado
-                    # pelo "Atualizar cotações" (que antes pulava tudo que já era manual).
-                    a.manual = 0
-            db.session.commit()
         except Exception as e:  # noqa: BLE001 — nunca pode deixar o job "rodando" pra sempre
             with _REFRESH_LOCK:
                 _REFRESH_JOBS[cid]["erro"] = str(e)

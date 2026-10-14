@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BackTest • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --purple:#a78bfa;
+    --page-a:var(--blue); --page-b:var(--purple); --tab-txt-on:#fff;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --purple:#7c3aed;
+    --tab-txt-on:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+         border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select{max-width:240px}
+
+  .wrap{padding:0 24px 40px}
+  .muted{color:var(--muted)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .em-construcao{border:1px dashed var(--line);border-radius:12px;background:var(--panel);
+                  padding:40px 24px;margin-top:10px;text-align:center;color:var(--muted)}
+  .em-construcao .ic{font-size:30px;margin-bottom:10px}
+  .em-construcao b{color:var(--txt)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>BackTest</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/preco-teto'">🏷️ Preço Teto</button>
+      <button class="tab-link" onclick="location.href='/numero-magico'">🔢 Número Mágico</button>
+      <button class="tab-link" onclick="location.href='/yield-on-cost'">💰 Yield on Cost</button>
+      <button class="tab-link on">🧪 BackTest</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="group-label">BackTest</div>
+  <div class="em-construcao">
+    <div class="ic">🧪</div>
+    <p style="margin:0"><b>Essa aba ainda está em construção.</b></p>
+    <p style="margin:8px 0 0;font-size:12.5px">Em breve: simular como uma estratégia (ou a carteira atual) teria performado no passado.</p>
+  </div>
+</div>
+
+<script>
+let CID = null;
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

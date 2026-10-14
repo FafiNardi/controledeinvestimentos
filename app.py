@@ -1601,6 +1601,13 @@ def preco_teto():
     return render_template("preco_teto.html", usuario=current_user.nome)
 
 
+@app.route("/backtest")
+@login_required
+def backtest():
+    """Aba nova, ainda sem funcionalidade — só a navegação e o esqueleto da página."""
+    return render_template("backtest.html", usuario=current_user.nome)
+
+
 @app.route("/api/carteira/<int:cid>/preco-teto")
 @login_required
 def api_preco_teto(cid):

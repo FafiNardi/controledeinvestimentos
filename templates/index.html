@@ -608,6 +608,20 @@ async function deletarCarteira(){
   if(r.ok){ CID = null; carregarCarteiras(); }
   else { alert('Erro ao excluir carteira.'); }
 }
+// Rentabilidade usa um vocabulário de classe um pouco diferente do Rebalanceamento (ex.:
+// "Ações" no plural, mais "Tesouro Direto"/"Fundo de Investimento"/"Caixa" que nem existem
+// nas opções daqui) — sem traduzir, o ativo copiado ficava com uma classe que não aparece
+// em nenhuma opção do seletor desta aba (foi o caso do Rafael: via "Ações" na tabela, mas
+// o <select> só oferece "Ação"). Só traduz o que tem equivalente direto; o que não tem
+// (Caixa, Tesouro Direto, Fundo de Investimento) cai no mais próximo que existe aqui
+// (Renda Fixa) — é melhor que deixar uma classe "fantasma" que não aparece em lugar nenhum.
+const CLASSE_RENT_PARA_REBAL = {
+  'Ações':'Ação', 'Caixa':'Renda Fixa', 'Tesouro Direto':'Renda Fixa',
+  'Fundo de Investimento':'Renda Fixa', 'Renda Fixa':'Renda Fixa',
+  'FII':'FII', 'FII Infra':'FII Infra', 'ETF':'ETF',
+};
+function traduzirClasseRent(classe){ return CLASSE_RENT_PARA_REBAL[classe] || ''; }
+
 // Copia pro Rebalanceamento os ativos já cadastrados na Rentabilidade dessa mesma carteira —
 // evita ter que digitar um por um de novo; entram com classe copiada e % ideal em 0, pra você só
 // preencher o percentual de cada um. Sempre como "manual" (sem buscar cotação sozinho), porque
@@ -634,7 +648,7 @@ async function copiarDaRentabilidade(){
   // em paralelo — são só inserções simples (manual:1 não busca cotação), não precisa ser sequencial
   await Promise.all(faltando.map(a =>
     fetch('/api/carteira/'+CID+'/assets',{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker: a.nome.trim(), classe: a.classe||'', manual:1})})));
+      body: JSON.stringify({ticker: a.nome.trim(), classe: traduzirClasseRent(a.classe), manual:1})})));
   await load();
   btn.disabled = false;
   st.textContent = `✓ ${faltando.length} copiado(s)`;

@@ -1734,6 +1734,19 @@ def ensure_schema():
                 "UPDATE rent_ativo SET classe='Caixa' WHERE is_caixa=1 "
                 "AND (classe IS NULL OR classe='')"))
             db.session.commit()
+    # "Copiar da Rentabilidade" (Rebalanceamento) copiava a classe sem traduzir o
+    # vocabulário — Rentabilidade usa "Ações" (plural) e tem "Tesouro Direto"/"Fundo de
+    # Investimento"/"Caixa", que não existem nas opções do Rebalanceamento. O ativo ficava
+    # com uma classe "fantasma", fora do padrão (foi o que o Rafael percebeu: via "Ações"
+    # na tabela, mas o filtro só tinha "Ação"). O código novo já traduz (ver
+    # traduzirClasseRent em index.html); isto aqui conserta o que já tinha sido copiado
+    # errado antes dessa correção existir.
+    if colunas_de("asset") is not None:
+        db.session.execute(text("UPDATE asset SET classe='Ação' WHERE classe='Ações'"))
+        db.session.execute(text(
+            "UPDATE asset SET classe='Renda Fixa' "
+            "WHERE classe IN ('Caixa', 'Tesouro Direto', 'Fundo de Investimento')"))
+        db.session.commit()
 
 
 with app.app_context():

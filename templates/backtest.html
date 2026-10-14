@@ -6,6 +6,7 @@
 <title>BackTest • Carteira</title>
 <script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
@@ -25,9 +26,14 @@
   button{background:var(--blue);color:#fff;border:0;border-radius:7px;
          padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
   button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:default;filter:none}
   button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
-  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+  button.icon{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+              padding:6px 9px;font-weight:400}
+  button.icon:hover{color:var(--red)}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
          border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  input::placeholder{color:var(--muted)}
   .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
   .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
   .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
@@ -57,12 +63,58 @@
              flex-shrink:0}
   .ctx-label select{max-width:240px}
 
-  .wrap{padding:0 24px 40px}
+  .wrap{padding:0 24px 40px;max-width:980px;margin:0 auto}
   .muted{color:var(--muted)}
   .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
                letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
                padding:26px 0 10px}
   .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px 20px}
+  .card + .card{margin-top:14px}
+  .card h2{margin:0 0 4px;font-size:14px}
+  .card p.hint{margin:0 0 14px;color:var(--muted);font-size:12px}
+
+  table.ativos{width:100%;border-collapse:collapse;font-size:13px}
+  table.ativos th{text-align:left;color:var(--muted);font-weight:700;font-size:11px;
+                  text-transform:uppercase;letter-spacing:.04em;padding:0 8px 8px;border-bottom:1px solid var(--line)}
+  table.ativos td{padding:6px 8px;border-bottom:1px solid var(--line)}
+  table.ativos input[type=text]{width:100%;text-transform:uppercase}
+  table.ativos input[type=number]{width:72px;text-align:right}
+  table.ativos select{width:100%}
+  .linha-di td{color:var(--muted);font-style:italic}
+  .linha-total td{border-bottom:0;padding-top:10px;font-weight:700}
+  .linha-total .ok{color:var(--green)}
+  .linha-total .bad{color:var(--red)}
+
+  .toggle-group{display:flex;gap:8px;margin-top:4px}
+  .toggle-opt{flex:1;border:1px solid var(--line);border-radius:9px;padding:10px 12px;cursor:pointer;
+              background:var(--panel2)}
+  .toggle-opt.on{border-color:var(--blue);background:rgba(91,141,239,.12)}
+  .toggle-opt b{display:block;font-size:12.5px;margin-bottom:2px}
+  .toggle-opt span{font-size:11.5px;color:var(--muted)}
+
+  .acoes-form{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  #statusSim{font-size:12px;color:var(--muted)}
+
+  .janelas{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .janela-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+              padding:6px 11px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer}
+  .janela-btn.on{background:var(--page-a);color:#fff;border-color:transparent}
+  .janela-btn:disabled{opacity:.35;cursor:default}
+
+  .resumo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .resumo-tile{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel2)}
+  .resumo-tile .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+  .resumo-tile .val{font-size:19px;font-weight:800;margin-top:4px;font-family:'IBM Plex Mono',monospace}
+  .resumo-tile.carteira{border-color:var(--blue)}
+  .resumo-tile .val.pos{color:var(--green)}
+  .resumo-tile .val.neg{color:var(--red)}
+
+  .chart-wrap{height:320px;margin-bottom:10px}
+  .avisos{margin-top:10px;font-size:12px;color:var(--amber)}
+  .avisos li{margin-bottom:3px}
+  .erro-sim{color:var(--red);font-size:12.5px;margin-top:10px}
+
   .em-construcao{border:1px dashed var(--line);border-radius:12px;background:var(--panel);
                   padding:40px 24px;margin-top:10px;text-align:center;color:var(--muted)}
   .em-construcao .ic{font-size:30px;margin-bottom:10px}
@@ -90,20 +142,80 @@
     <label class="ctx-label">Carteira
       <select id="selCarteira" onchange="trocarCarteira()"></select>
     </label>
+    <button class="ghost" onclick="carregarDaCarteira()"
+      title="Preenche a lista abaixo com os ativos (e pesos atuais) dessa carteira, como ponto de partida">
+      ⬇️ Carregar ativos dessa carteira
+    </button>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="group-label">BackTest</div>
-  <div class="em-construcao">
-    <div class="ic">🧪</div>
-    <p style="margin:0"><b>Essa aba ainda está em construção.</b></p>
-    <p style="margin:8px 0 0;font-size:12.5px">Em breve: simular como uma estratégia (ou a carteira atual) teria performado no passado.</p>
+  <div class="group-label">Monte a carteira hipotética</div>
+  <div class="card">
+    <h2>Ativos da simulação</h2>
+    <p class="hint">Ações, FIIs e FII Infra. Os pesos (%) têm que somar 100 junto com o Fundo DI.</p>
+    <table class="ativos">
+      <thead><tr><th style="width:38%">Ticker</th><th style="width:28%">Classe</th><th>Peso %</th><th></th></tr></thead>
+      <tbody id="corpoAtivos"></tbody>
+      <tfoot>
+        <tr class="linha-di">
+          <td>Fundo DI</td>
+          <td><span class="muted">rende exatamente o CDI do período, sem taxas</span></td>
+          <td><input type="number" id="pesoDi" min="0" max="100" step="0.1" value="0" oninput="atualizarTotal()"></td>
+          <td></td>
+        </tr>
+        <tr class="linha-total">
+          <td colspan="2">Total</td>
+          <td colspan="2" id="totalPesos">0,0%</td>
+        </tr>
+      </tfoot>
+    </table>
+    <div class="acoes-form">
+      <button class="ghost" onclick="adicionarLinha()">+ Adicionar ativo</button>
+    </div>
+
+    <div class="group-label" style="padding-top:20px">Dividendos recebidos</div>
+    <div class="toggle-group">
+      <div class="toggle-opt on" id="optReinveste" onclick="setReinveste(true)">
+        <b>Reinvestidos</b><span>Cada dividendo compra mais do próprio ativo na hora do pagamento (retorno total)</span>
+      </div>
+      <div class="toggle-opt" id="optCaixa" onclick="setReinveste(false)">
+        <b>Ficam em caixa</b><span>Somados ao total final, mas sem render nada até lá</span>
+      </div>
+    </div>
+
+    <div class="acoes-form">
+      <button id="btnRodar" onclick="rodarBackTest()">⚡ Rodar BackTest</button>
+      <span id="statusSim"></span>
+    </div>
+    <div class="erro-sim" id="erroSim" style="display:none"></div>
+  </div>
+
+  <div class="group-label">Resultado</div>
+  <div class="card" id="cardResultado">
+    <div class="em-construcao" id="semResultado">
+      <div class="ic">🧪</div>
+      <p style="margin:0"><b>Monte a carteira acima e clique em "Rodar BackTest".</b></p>
+      <p style="margin:8px 0 0;font-size:12.5px">O resultado mostra, pra cada janela de 1 a 10 anos, como essa carteira teria
+        se saído contra o CDI e o Ibovespa.</p>
+    </div>
+    <div id="comResultado" style="display:none">
+      <div class="janelas" id="janelas"></div>
+      <div class="resumo-grid" id="resumoGrid"></div>
+      <div class="chart-wrap"><canvas id="chBackTest"></canvas></div>
+      <ul class="avisos" id="avisosJanela"></ul>
+    </div>
   </div>
 </div>
 
 <script>
 let CID = null;
+let LINHAS = [];       // [{ticker, classe, peso}]
+let LINHA_SEQ = 0;
+let REINVESTE = true;
+let RESULTADO = null;  // resposta da última simulação
+let JANELA_ATUAL = null;
+let chBT = null;
 
 function toggleTema(){
   const claro = document.documentElement.getAttribute('data-theme')==='light';
@@ -133,6 +245,168 @@ async function trocarCarteira(){
   if(CID) localStorage.setItem('ultimaCarteiraId', CID);
 }
 
+// --------------------------------------------------------------------- //
+// Montagem da carteira hipotética
+// --------------------------------------------------------------------- //
+
+function linhaVazia(){ return {id: ++LINHA_SEQ, ticker:'', classe:'Ação', peso: 0}; }
+
+function adicionarLinha(linha){
+  LINHAS.push(linha || linhaVazia());
+  renderLinhas();
+}
+function removerLinha(id){
+  LINHAS = LINHAS.filter(l=>l.id!==id);
+  renderLinhas();
+}
+function renderLinhas(){
+  const corpo = document.getElementById('corpoAtivos');
+  corpo.innerHTML = LINHAS.map(l=>`
+    <tr>
+      <td><input type="text" value="${l.ticker}" placeholder="ex: PETR4"
+          oninput="LINHAS.find(x=>x.id===${l.id}).ticker=this.value.toUpperCase()"></td>
+      <td><select onchange="LINHAS.find(x=>x.id===${l.id}).classe=this.value">
+            ${['Ação','FII','FII Infra'].map(c=>`<option ${c===l.classe?'selected':''}>${c}</option>`).join('')}
+          </select></td>
+      <td><input type="number" min="0" max="100" step="0.1" value="${l.peso}"
+          oninput="LINHAS.find(x=>x.id===${l.id}).peso=parseFloat(this.value)||0;atualizarTotal()"></td>
+      <td><button class="icon" onclick="removerLinha(${l.id})" title="Remover">✕</button></td>
+    </tr>`).join('');
+  atualizarTotal();
+}
+function atualizarTotal(){
+  const pesoDi = parseFloat(document.getElementById('pesoDi').value) || 0;
+  const total = LINHAS.reduce((s,l)=>s+(l.peso||0), 0) + pesoDi;
+  const el = document.getElementById('totalPesos');
+  el.textContent = total.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+  el.className = Math.abs(total-100)<0.5 ? 'ok' : 'bad';
+}
+function setReinveste(v){
+  REINVESTE = v;
+  document.getElementById('optReinveste').classList.toggle('on', v);
+  document.getElementById('optCaixa').classList.toggle('on', !v);
+}
+
+async function carregarDaCarteira(){
+  if(!CID){ alert('Selecione uma carteira primeiro.'); return; }
+  const r = await fetch(`/api/carteira/${CID}/preco-teto`);
+  const d = await r.json();
+  const ativos = (d.ativos||[]).filter(a=>!a.oculto && (a.num_acoes||0)>0 && (a.preco||0)>0);
+  if(!ativos.length){ alert('Essa carteira não tem ativos elegíveis (ações/FII com preço e posição).'); return; }
+  const total = ativos.reduce((s,a)=>s+a.preco*a.num_acoes, 0);
+  LINHAS = ativos.map(a=>({
+    id: ++LINHA_SEQ, ticker: a.ticker.toUpperCase(),
+    classe: (a.classe||'').toLowerCase().includes('fii infra') ? 'FII Infra'
+          : (a.classe||'').toLowerCase().includes('fii') ? 'FII' : 'Ação',
+    peso: Math.round((a.preco*a.num_acoes/total)*1000)/10,
+  }));
+  document.getElementById('pesoDi').value = 0;
+  renderLinhas();
+}
+
+// --------------------------------------------------------------------- //
+// Rodar simulação
+// --------------------------------------------------------------------- //
+
+async function rodarBackTest(){
+  const pesoDi = parseFloat(document.getElementById('pesoDi').value) || 0;
+  const ativos = LINHAS.filter(l=>l.ticker.trim() && l.peso>0)
+    .map(l=>({ticker:l.ticker.trim(), classe:l.classe, peso:l.peso}));
+  const total = ativos.reduce((s,a)=>s+a.peso,0) + pesoDi;
+  const erroEl = document.getElementById('erroSim');
+  erroEl.style.display = 'none';
+  if(!ativos.length && pesoDi<=0){ alert('Adicione pelo menos um ativo (ou o Fundo DI) com peso.'); return; }
+  if(Math.abs(total-100) > 0.5){ alert(`Os pesos somam ${total.toFixed(1)}%, mas precisam somar 100%.`); return; }
+
+  const btn = document.getElementById('btnRodar');
+  const status = document.getElementById('statusSim');
+  btn.disabled = true;
+  status.textContent = '⏳ Buscando histórico e calculando — pode levar alguns segundos na primeira vez...';
+  try{
+    const r = await fetch('/api/backtest/simular', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ativos, fundo_di_peso: pesoDi, reinveste: REINVESTE}),
+    });
+    const d = await r.json();
+    if(!r.ok || d.erro){
+      erroEl.textContent = d.erro || 'Não foi possível rodar a simulação.';
+      erroEl.style.display = '';
+      status.textContent = '';
+      return;
+    }
+    RESULTADO = d;
+    status.textContent = '';
+    renderResultado();
+  } catch(e){
+    erroEl.textContent = 'Falha de rede ao chamar a simulação: ' + e.message;
+    erroEl.style.display = '';
+    status.textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResultado(){
+  document.getElementById('semResultado').style.display = 'none';
+  document.getElementById('comResultado').style.display = '';
+  const disponiveis = RESULTADO.janelas.filter(j=>j.disponivel);
+  document.getElementById('janelas').innerHTML = RESULTADO.janelas.map(j=>
+    `<button class="janela-btn" ${j.disponivel?'':'disabled title="sem dado suficiente pra essa janela"'}
+       onclick="selecionarJanela(${j.anos})" id="janela-${j.anos}">${j.anos} ano${j.anos>1?'s':''}</button>`
+  ).join('');
+  const preferida = disponiveis.find(j=>j.anos===5) || disponiveis[disponiveis.length-1];
+  selecionarJanela(preferida ? preferida.anos : null);
+}
+
+function selecionarJanela(anos){
+  JANELA_ATUAL = anos;
+  document.querySelectorAll('.janela-btn').forEach(b=>b.classList.remove('on'));
+  if(anos==null) return;
+  document.getElementById(`janela-${anos}`).classList.add('on');
+  const j = RESULTADO.janelas.find(x=>x.anos===anos);
+
+  const tile = (lbl, pct, destaque) => `
+    <div class="resumo-tile ${destaque?'carteira':''}">
+      <div class="lbl">${lbl}</div>
+      <div class="val ${pct>=0?'pos':'neg'}">${pct>=0?'+':''}${pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
+    </div>`;
+  document.getElementById('resumoGrid').innerHTML =
+    tile('Carteira', j.retorno_pct.carteira, true) +
+    tile('CDI', j.retorno_pct.cdi) +
+    tile('Ibovespa', j.retorno_pct.ibov) +
+    `<div class="resumo-tile"><div class="lbl">Dividendos recebidos</div>
+       <div class="val">${j.dividendos_recebidos_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div></div>`;
+
+  document.getElementById('avisosJanela').innerHTML =
+    (j.avisos||[]).map(a=>`<li>⚠️ ${a}</li>`).join('');
+
+  const labels = j.pontos.map(p=>{
+    const [ano,mes] = p.mes.split('-');
+    return `${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+mes-1]}/${ano.slice(2)}`;
+  });
+  if(chBT) chBT.destroy();
+  chBT = new Chart(document.getElementById('chBackTest'), {
+    type:'line',
+    data:{ labels, datasets:[
+      {label:'Carteira', data:j.pontos.map(p=>p.carteira), borderColor:'#5b8def', backgroundColor:'rgba(91,141,239,.12)', borderWidth:2.5, pointRadius:0, tension:.15},
+      {label:'CDI', data:j.pontos.map(p=>p.cdi), borderColor:'#34d399', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
+      {label:'Ibovespa', data:j.pontos.map(p=>p.ibov), borderColor:'#a78bfa', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      plugins:{ legend:{labels:{color:'#8ca0b3'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}`}} },
+      scales:{
+        x:{ticks:{color:'#8ca0b3', maxRotation:0, autoSkip:true}, grid:{color:'rgba(255,255,255,.04)'}},
+        y:{ticks:{color:'#8ca0b3', callback:v=>v}, grid:{color:'rgba(255,255,255,.06)'},
+           title:{display:true, text:'Índice (100 = início do período)', color:'#8ca0b3'}},
+      },
+    },
+  });
+}
+
+adicionarLinha();
 carregarCarteiras();
 </script>
 </body>

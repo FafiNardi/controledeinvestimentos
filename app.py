@@ -236,6 +236,38 @@ class DarfPagamento(db.Model):
     __table_args__ = (db.UniqueConstraint("carteira_id", "mes", "regime"),)
 
 
+class HistoricoPreco(db.Model):
+    """Cache do preço de fechamento mensal de um ticker (BackTest). Mês fechado nunca muda
+    de valor, então uma vez salvo não precisa buscar de novo — só o mês corrente é
+    recalculado a cada simulação. Não tem carteira_id: o mesmo ticker usado em carteiras
+    ou simulações diferentes compartilha a mesma linha de cache."""
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False)
+    mes = db.Column(db.String(7), nullable=False)   # YYYY-MM
+    preco = db.Column(db.Float, nullable=False)
+    __table_args__ = (db.UniqueConstraint("ticker", "mes"),)
+
+
+class HistoricoProvento(db.Model):
+    """Cache de dividendo/JCP/rendimento pago por um ticker, por mês de pagamento
+    (somado quando cai mais de um pagamento no mesmo mês)."""
+    id = db.Column(db.Integer, primary_key=True)
+    ticker = db.Column(db.String(20), nullable=False)
+    mes = db.Column(db.String(7), nullable=False)   # YYYY-MM (mês do pagamento)
+    valor = db.Column(db.Float, nullable=False)     # valor por ação/cota, somado no mês
+    __table_args__ = (db.UniqueConstraint("ticker", "mes"),)
+
+
+class HistoricoIndice(db.Model):
+    """Cache do fator de retorno mensal (1.0089 = +0,89% no mês) do CDI e do Ibovespa —
+    compartilhado por todo mundo, não depende de usuário/carteira."""
+    id = db.Column(db.Integer, primary_key=True)
+    indice = db.Column(db.String(10), nullable=False)  # "CDI" ou "IBOV"
+    mes = db.Column(db.String(7), nullable=False)       # YYYY-MM
+    fator = db.Column(db.Float, nullable=False)
+    __table_args__ = (db.UniqueConstraint("indice", "mes"),)
+
+
 @login_manager.user_loader
 def load_user(uid):
     return db.session.get(User, int(uid))
@@ -512,6 +544,400 @@ def fetch_investidor10_historico(ticker: str) -> dict:
     if out["crescimento_lucro"] is None and out["crescimento_roe"] is None:
         out["erro"] = out["erro"] or "histórico não encontrado no Investidor10"
     return out
+
+
+# --------------------------------------------------------------------------- #
+# BackTest — histórico mensal de preço/provento (brapi.dev) e dos benchmarks CDI
+# (BACEN) e Ibovespa (Yahoo Finance), com cache permanente no banco (mês fechado
+# nunca muda de valor, só o mês corrente é deixado de fora do cache).
+# --------------------------------------------------------------------------- #
+
+BRAPI_TOKEN = os.environ.get("BRAPI_TOKEN", "")
+JANELAS_BACKTEST = list(range(1, 11))  # 1 a 10 anos
+
+
+def _mes_atual() -> str:
+    return datetime.now().strftime("%Y-%m")
+
+
+def _mes_anterior(mes: str) -> str:
+    ano, m = int(mes[:4]), int(mes[5:7])
+    ano, m = (ano - 1, 12) if m == 1 else (ano, m - 1)
+    return f"{ano:04d}-{m:02d}"
+
+
+def _meses_entre(mes_inicio: str, mes_fim: str) -> list:
+    """Lista de 'YYYY-MM' de mes_inicio até mes_fim, inclusive, em ordem crescente."""
+    out = []
+    atual = mes_inicio
+    while atual <= mes_fim:
+        out.append(atual)
+        ano, m = int(atual[:4]), int(atual[5:7])
+        ano, m = (ano + 1, 1) if m == 12 else (ano, m + 1)
+        atual = f"{ano:04d}-{m:02d}"
+    return out
+
+
+def _brapi_headers() -> dict:
+    h = {"Accept": "application/json"}
+    if BRAPI_TOKEN:
+        h["Authorization"] = f"Bearer {BRAPI_TOKEN}"
+    return h
+
+
+def _brapi_get(path: str, params: dict):
+    """GET num endpoint /api/v2 da brapi.dev. Trata 401 (token ausente/inválido), 404
+    (ticker não encontrado na lista) e 429 (limite excedido — respeita o header
+    Retry-After quando vem e for curto, tenta de novo uma vez só). Nunca lança exceção;
+    devolve sempre (dados_ou_None, erro_ou_None)."""
+    for tentativa in range(2):
+        try:
+            r = requests.get(f"https://brapi.dev{path}", params=params,
+                              headers=_brapi_headers(), timeout=20)
+        except Exception as e:  # noqa: BLE001
+            return None, str(e)
+        if r.status_code == 429:
+            espera = r.headers.get("Retry-After", "")
+            if tentativa == 0 and espera.isdigit() and int(espera) <= 10:
+                time.sleep(int(espera))
+                continue
+            return None, "limite de requisições da brapi.dev excedido — tente de novo em instantes"
+        if r.status_code == 401:
+            return None, ("brapi.dev recusou o token (BRAPI_TOKEN ausente ou inválido) — "
+                           "configure uma chave válida em brapi.dev/dashboard")
+        if r.status_code == 404:
+            return None, "ticker não encontrado na brapi.dev"
+        try:
+            data = r.json()
+        except ValueError:
+            return None, f"resposta inválida da brapi.dev (HTTP {r.status_code})"
+        if isinstance(data, dict) and data.get("error"):
+            return None, data.get("message") or "erro desconhecido na brapi.dev"
+        return data, None
+    return None, "limite de requisições da brapi.dev excedido"
+
+
+def fetch_historico_acoes(tickers: list) -> dict:
+    """Preço de fechamento mensal + dividendos de uma lista de ações, em no máximo 2
+    chamadas (uma de histórico, uma de dividendos) pra lista inteira via 'symbols=A,B,C' —
+    bem mais barato pro Render do que uma chamada por ticker. Devolve {ticker: {"precos":
+    {mes: preco}, "proventos": {mes: valor_somado}, "erro": None|str}}."""
+    out = {t: {"precos": {}, "proventos": {}, "erro": None} for t in tickers}
+    symbols = ",".join(tickers)
+    data, erro = _brapi_get("/api/v2/stocks/historical",
+                             {"symbols": symbols, "range": "10y", "interval": "1mo"})
+    if erro:
+        for t in tickers:
+            out[t]["erro"] = erro
+        return out
+    for res in (data.get("results") or []):
+        t = (res.get("symbol") or res.get("requestedSymbol") or "").upper()
+        if t not in out:
+            continue
+        for ponto in ((res.get("data") or {}).get("historicalDataPrice") or []):
+            if ponto.get("close") is None:
+                continue
+            mes = datetime.utcfromtimestamp(ponto["date"]).strftime("%Y-%m")
+            out[t]["precos"][mes] = ponto["close"]  # ordem crescente — o último do mês fica
+        if not out[t]["precos"]:
+            out[t]["erro"] = "sem histórico de preço retornado pela brapi.dev"
+
+    data_div, erro_div = _brapi_get("/api/v2/stocks/dividends", {"symbols": symbols})
+    if erro_div:
+        return out  # preço já veio; dividendo zerado é só uma perda parcial, não é fatal
+    for res in (data_div.get("results") or []):
+        t = (res.get("symbol") or res.get("requestedSymbol") or "").upper()
+        if t not in out:
+            continue
+        for d in ((res.get("data") or {}).get("cashDividends") or []):
+            data_pag = d.get("paymentDate") or d.get("lastDatePrior")
+            if not data_pag or d.get("rate") is None:
+                continue
+            mes = data_pag[:7]
+            out[t]["proventos"][mes] = out[t]["proventos"].get(mes, 0) + d["rate"]
+    return out
+
+
+def fetch_historico_fiis(tickers: list) -> dict:
+    """Preço + dividendos de uma lista de FIIs (inclui FII Infra). Endpoint próprio da
+    brapi.dev pra fundos — formato de resposta diferente do de ações ('fiis'/'dividends'
+    direto na raiz, sem o wrapper 'results'/'data'), e só devolve preço diário (sem opção
+    de intervalo mensal) — o fechamento mensal é extraído aqui, ficando com o último preço
+    de cada mês."""
+    out = {t: {"precos": {}, "proventos": {}, "erro": None} for t in tickers}
+    symbols = ",".join(tickers)
+    data_ini = (datetime.now() - timedelta(days=365 * 10 + 60)).strftime("%Y-%m-%d")
+    data, erro = _brapi_get("/api/v2/fii/historical",
+                             {"symbols": symbols, "startDate": data_ini, "sortOrder": "asc"})
+    if erro:
+        for t in tickers:
+            out[t]["erro"] = erro
+        return out
+    for serie in (data.get("fiis") or []):
+        t = (serie.get("symbol") or "").upper()
+        if t not in out:
+            continue
+        for ponto in (serie.get("historicalDataPrice") or []):
+            if ponto.get("close") is None:
+                continue
+            mes = datetime.utcfromtimestamp(ponto["date"]).strftime("%Y-%m")
+            out[t]["precos"][mes] = ponto["close"]
+        if not out[t]["precos"]:
+            out[t]["erro"] = "sem histórico de preço retornado pela brapi.dev"
+
+    data_div, erro_div = _brapi_get("/api/v2/fii/dividends",
+                                     {"symbols": symbols, "startDate": data_ini})
+    if erro_div:
+        return out
+    for d in (data_div.get("dividends") or []):
+        t = (d.get("symbol") or "").upper()
+        if t not in out or d.get("rate") is None or not d.get("paymentDate"):
+            continue
+        mes = d["paymentDate"][:7]
+        out[t]["proventos"][mes] = out[t]["proventos"].get(mes, 0) + d["rate"]
+    return out
+
+
+def garantir_historico_tickers(ativos: list) -> dict:
+    """ativos: [{'ticker','classe'}, ...]. Separa ações de FIIs (mesmo critério visual já
+    usado na aba Preço Teto: classe contém 'fii', cobre FII e FII Infra) e faz no máximo
+    2 chamadas em lote pra brapi.dev — só pros tickers que ainda não tiverem o mês fechado
+    mais recente em cache. Devolve {ticker: mensagem_de_erro} só pros que falharam."""
+    mes_alvo = _mes_anterior(_mes_atual())
+    pendentes = []
+    for a in ativos:
+        t = a["ticker"].strip().upper()
+        if not db.session.query(HistoricoPreco.mes).filter_by(ticker=t, mes=mes_alvo).first():
+            pendentes.append({"ticker": t, "classe": (a.get("classe") or "").lower()})
+    erros = {}
+    if not pendentes:
+        return erros
+
+    fiis = [a["ticker"] for a in pendentes if "fii" in a["classe"]]
+    acoes = [a["ticker"] for a in pendentes if "fii" not in a["classe"]]
+    resultados = {}
+    if acoes:
+        resultados.update(fetch_historico_acoes(acoes))
+    if fiis:
+        resultados.update(fetch_historico_fiis(fiis))
+
+    for t, dados in resultados.items():
+        if not dados["precos"]:
+            erros[t] = dados["erro"] or f"{t}: sem dado histórico"
+            continue
+        for mes, preco in dados["precos"].items():
+            existente = HistoricoPreco.query.filter_by(ticker=t, mes=mes).first()
+            if existente:
+                existente.preco = preco
+            else:
+                db.session.add(HistoricoPreco(ticker=t, mes=mes, preco=preco))
+        for mes, valor in dados["proventos"].items():
+            existente = HistoricoProvento.query.filter_by(ticker=t, mes=mes).first()
+            if existente:
+                existente.valor = valor
+            else:
+                db.session.add(HistoricoProvento(ticker=t, mes=mes, valor=valor))
+    db.session.commit()
+    return erros
+
+
+def fetch_cdi_mensal_fator() -> dict:
+    """Fator de retorno mensal do CDI (1.0089 = +0,89% no mês) dos últimos ~10 anos, via
+    BACEN SGS série 12 (CDI diário, taxa % ao dia) — composto dia a dia dentro de cada
+    mês. Devolve {"fatores": {mes: fator}, "erro": None|str}."""
+    out = {"fatores": {}, "erro": None}
+    try:
+        # o BACEN recusa (406) qualquer janela de série diária acima de exatamente 10 anos —
+        # por isso a margem é pra DENTRO (365*10 - 5), ao contrário do buffer de folga usado
+        # nas outras fontes (brapi.dev, Yahoo), que não têm esse teto
+        data_ini = datetime.now() - timedelta(days=365 * 10 - 5)
+        url = ("https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados"
+               f"?formato=json&dataInicial={data_ini.strftime('%d/%m/%Y')}"
+               f"&dataFinal={datetime.now().strftime('%d/%m/%Y')}")
+        r = requests.get(url, headers=INVESTIDOR10_HEADERS, timeout=30)
+        r.raise_for_status()
+        por_mes = {}
+        for item in r.json():
+            dt = datetime.strptime(item["data"], "%d/%m/%Y")
+            mes = dt.strftime("%Y-%m")
+            taxa_dia = float(item["valor"]) / 100
+            por_mes[mes] = por_mes.get(mes, 1.0) * (1 + taxa_dia)
+        out["fatores"] = por_mes
+        if not por_mes:
+            out["erro"] = "BACEN não retornou dados de CDI"
+    except Exception as e:  # noqa: BLE001
+        out["erro"] = str(e)
+    return out
+
+
+def fetch_ibov_mensal_fator() -> dict:
+    """Fator de retorno mensal do Ibovespa dos últimos ~10 anos, via Yahoo Finance
+    (fechamento mensal do ^BVSP). Devolve {"fatores": {mes: fator}, "erro": None|str}."""
+    out = {"fatores": {}, "erro": None}
+    try:
+        r = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5EBVSP",
+            params={"range": "10y", "interval": "1mo"},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        r.raise_for_status()
+        res = r.json()["chart"]["result"][0]
+        timestamps = res["timestamp"]
+        closes = res["indicators"]["quote"][0]["close"]
+        fechamentos = {}
+        for ts, close in zip(timestamps, closes):
+            if close is None:
+                continue
+            mes = datetime.utcfromtimestamp(ts).strftime("%Y-%m")
+            fechamentos[mes] = close  # ordem crescente — o último fechamento do mês fica
+        meses_ordenados = sorted(fechamentos.keys())
+        fatores, anterior = {}, None
+        for mes in meses_ordenados:
+            if anterior is not None:
+                fatores[mes] = fechamentos[mes] / fechamentos[anterior]
+            anterior = mes
+        out["fatores"] = fatores
+        if not fatores:
+            out["erro"] = "Yahoo Finance não retornou dados do Ibovespa"
+    except Exception as e:  # noqa: BLE001
+        out["erro"] = str(e)
+    return out
+
+
+def garantir_historico_indices():
+    """Garante HistoricoIndice (CDI e IBOV) cacheado até o mês fechado mais recente —
+    mesma lógica de 'só busca se faltar' do garantir_historico_ticker."""
+    mes_alvo = _mes_anterior(_mes_atual())
+    erros = []
+    for indice, fetcher in (("CDI", fetch_cdi_mensal_fator), ("IBOV", fetch_ibov_mensal_fator)):
+        if db.session.query(HistoricoIndice.mes).filter_by(indice=indice, mes=mes_alvo).first():
+            continue
+        dados = fetcher()
+        if not dados["fatores"]:
+            erros.append(f"{indice}: {dados['erro']}")
+            continue
+        for mes, fator in dados["fatores"].items():
+            existente = HistoricoIndice.query.filter_by(indice=indice, mes=mes).first()
+            if existente:
+                existente.fator = fator
+            else:
+                db.session.add(HistoricoIndice(indice=indice, mes=mes, fator=fator))
+        db.session.commit()
+    return "; ".join(erros) or None
+
+
+def _serie_mensal_ativo(ticker: str) -> list:
+    """Série cronológica de {mes, fator, provento} de um ticker a partir do cache. 'fator'
+    é preco_mes / preco_mes_anterior (None no primeiro mês, que não tem mês anterior)."""
+    precos = {p.mes: p.preco for p in HistoricoPreco.query.filter_by(ticker=ticker).all()}
+    proventos = {p.mes: p.valor for p in HistoricoProvento.query.filter_by(ticker=ticker).all()}
+    serie, anterior = [], None
+    for mes in sorted(precos.keys()):
+        fator = (precos[mes] / precos[anterior]) if anterior else None
+        serie.append({"mes": mes, "fator": fator, "preco": precos[mes],
+                      "preco_anterior": precos[anterior] if anterior else None,
+                      "provento": proventos.get(mes, 0) or 0})
+        anterior = mes
+    return serie
+
+
+def simular_backtest(ativos, fundo_di_peso, reinveste):
+    """ativos: [{"ticker","classe","peso"}, ...] — peso em %, soma com fundo_di_peso ~100%.
+    Busca (e cacheia) o histórico necessário e devolve uma janela de 1 a 10 anos, cada uma
+    comparando a carteira simulada (buy and hold, sem rebalancear) contra CDI e Ibovespa."""
+    avisos_busca = []
+    erro_indices = garantir_historico_indices()
+    if erro_indices:
+        avisos_busca.append(erro_indices)
+    erros_tickers = garantir_historico_tickers(ativos)
+    for t, erro in erros_tickers.items():
+        avisos_busca.append(f"{t}: {erro}")
+    series_ativos = {a["ticker"].strip().upper(): _serie_mensal_ativo(a["ticker"].strip().upper())
+                      for a in ativos}
+
+    cdi = {h.mes: h.fator for h in HistoricoIndice.query.filter_by(indice="CDI").all()}
+    ibov = {h.mes: h.fator for h in HistoricoIndice.query.filter_by(indice="IBOV").all()}
+    meses_com_benchmark = sorted(set(cdi) | set(ibov))
+    if not meses_com_benchmark:
+        return {"janelas": [], "erro": "; ".join(avisos_busca) or "sem dados de CDI/Ibovespa"}
+    mes_fim = min(meses_com_benchmark[-1], _mes_anterior(_mes_atual()))
+
+    janelas = []
+    for anos in JANELAS_BACKTEST:
+        d_fim = datetime.strptime(mes_fim + "-01", "%Y-%m-%d")
+        mes_ini_ideal = f"{d_fim.year - anos:04d}-{d_fim.month:02d}"
+
+        mes_ini_efetivo = mes_ini_ideal
+        avisos = list(avisos_busca)
+        ativos_validos = []
+        for a in ativos:
+            t = a["ticker"].strip().upper()
+            serie = series_ativos.get(t) or []
+            if not serie:
+                avisos.append(f"{t}: sem dado histórico — excluído da simulação")
+                continue
+            ativos_validos.append(a)
+            primeiro_mes = serie[0]["mes"]
+            if primeiro_mes > mes_ini_efetivo:
+                avisos.append(f"{t} só tem histórico a partir de {primeiro_mes} — "
+                               "essa janela começa mais tarde por causa dele")
+                mes_ini_efetivo = max(mes_ini_efetivo, primeiro_mes)
+
+        if mes_ini_efetivo < meses_com_benchmark[0]:
+            avisos.append("CDI/Ibovespa só têm dado a partir de "
+                           f"{meses_com_benchmark[0]} — essa janela começa mais tarde por causa disso")
+            mes_ini_efetivo = max(mes_ini_efetivo, meses_com_benchmark[0])
+
+        meses_janela = _meses_entre(mes_ini_efetivo, mes_fim)
+        if len(meses_janela) < 2 or (not ativos_validos and fundo_di_peso <= 0):
+            janelas.append({"anos": anos, "disponivel": False, "avisos": avisos})
+            continue
+
+        posicoes = {a["ticker"].strip().upper(): 100.0 * (a["peso"] / 100) for a in ativos_validos}
+        valor_di = 100.0 * (fundo_di_peso / 100)
+        caixa = 0.0
+        valor_cdi = valor_ibov = 100.0
+        dividendos_recebidos = 0.0
+        pontos = [{"mes": meses_janela[0], "carteira": 100.0, "cdi": 100.0, "ibov": 100.0}]
+
+        # indexa cada série por mês uma vez, fora do loop (evita repetir "next(... for ...)"
+        # a cada mês x cada ativo — isso ficava O(janela x ativos x tamanho_da_série_inteira))
+        series_por_mes = {t: {p["mes"]: p for p in (series_ativos.get(t) or [])}
+                           for t in posicoes}
+
+        for i in range(1, len(meses_janela)):
+            mes = meses_janela[i]
+            for t in list(posicoes.keys()):
+                ponto = series_por_mes[t].get(mes)
+                fator = (ponto["fator"] if ponto and ponto["fator"] else 1.0)
+                provento = (ponto["provento"] if ponto else 0) or 0
+                preco_anterior = ponto["preco_anterior"] if ponto else None
+                valor_antes = posicoes[t]
+                posicoes[t] = valor_antes * fator
+                if provento and preco_anterior:
+                    # provento é valor por cota; dividido pelo preço do mês anterior dá o
+                    # "yield" do mês, aplicado sobre o valor que a posição tinha antes dele
+                    divid_valor = valor_antes * (provento / preco_anterior)
+                    dividendos_recebidos += divid_valor
+                    if reinveste:
+                        posicoes[t] += divid_valor
+                    else:
+                        caixa += divid_valor
+            valor_di *= cdi.get(mes, 1.0)
+            valor_cdi *= cdi.get(mes, 1.0)
+            valor_ibov *= ibov.get(mes, 1.0)
+            valor_carteira = sum(posicoes.values()) + valor_di + caixa
+            pontos.append({"mes": mes, "carteira": round(valor_carteira, 4),
+                            "cdi": round(valor_cdi, 4), "ibov": round(valor_ibov, 4)})
+
+        janelas.append({
+            "anos": anos, "disponivel": True, "mes_inicio": mes_ini_efetivo, "mes_fim": mes_fim,
+            "avisos": avisos, "pontos": pontos,
+            "retorno_pct": {"carteira": round(pontos[-1]["carteira"] - 100, 2),
+                            "cdi": round(pontos[-1]["cdi"] - 100, 2),
+                            "ibov": round(pontos[-1]["ibov"] - 100, 2)},
+            "dividendos_recebidos_pct": round(dividendos_recebidos, 2),
+        })
+    return {"janelas": janelas, "erro": None}
 
 
 def fetch_quote(ticker: str, moeda: str = "BRL") -> dict:
@@ -1604,8 +2030,41 @@ def preco_teto():
 @app.route("/backtest")
 @login_required
 def backtest():
-    """Aba nova, ainda sem funcionalidade — só a navegação e o esqueleto da página."""
     return render_template("backtest.html", usuario=current_user.nome)
+
+
+@app.route("/api/backtest/simular", methods=["POST"])
+@login_required
+def api_backtest_simular():
+    """Simula uma carteira hipotética (buy and hold) contra CDI e Ibovespa em janelas
+    de 1 a 10 anos. Não depende de nenhuma carteira real — é só uma lista de tickers
+    digitada na hora, por isso não tem carteira_id nem checagem de dono."""
+    data = request.get_json(force=True)
+    ativos_in = data.get("ativos") or []
+    fundo_di_peso = float(data.get("fundo_di_peso") or 0)
+    reinveste = bool(data.get("reinveste", True))
+
+    ativos = []
+    for a in ativos_in:
+        ticker = (a.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        try:
+            peso = float(a.get("peso") or 0)
+        except (TypeError, ValueError):
+            peso = 0
+        if peso <= 0:
+            continue
+        ativos.append({"ticker": ticker, "classe": a.get("classe") or "", "peso": peso})
+
+    soma_pesos = sum(a["peso"] for a in ativos) + fundo_di_peso
+    if not ativos and fundo_di_peso <= 0:
+        return jsonify({"erro": "adicione pelo menos um ativo (ou o Fundo DI) com peso"}), 400
+    if abs(soma_pesos - 100) > 0.5:
+        return jsonify({"erro": f"os pesos somam {soma_pesos:.1f}%, mas precisam somar 100%"}), 400
+
+    resultado = simular_backtest(ativos, fundo_di_peso, reinveste)
+    return jsonify(resultado)
 
 
 @app.route("/api/carteira/<int:cid>/preco-teto")

@@ -548,12 +548,11 @@ def fetch_investidor10_historico(ticker: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# BackTest — histórico mensal de preço/provento (brapi.dev) e dos benchmarks CDI
+# BackTest — histórico mensal de preço/provento (Yahoo Finance) e dos benchmarks CDI
 # (BACEN) e Ibovespa (Yahoo Finance), com cache permanente no banco (mês fechado
 # nunca muda de valor, só o mês corrente é deixado de fora do cache).
 # --------------------------------------------------------------------------- #
 
-BRAPI_TOKEN = os.environ.get("BRAPI_TOKEN", "")
 JANELAS_BACKTEST = list(range(1, 11))  # 1 a 10 anos
 
 
@@ -579,149 +578,51 @@ def _meses_entre(mes_inicio: str, mes_fim: str) -> list:
     return out
 
 
-def _brapi_headers() -> dict:
-    h = {"Accept": "application/json"}
-    if BRAPI_TOKEN:
-        h["Authorization"] = f"Bearer {BRAPI_TOKEN}"
-    return h
-
-
-def _brapi_get(path: str, params: dict):
-    """GET num endpoint /api/v2 da brapi.dev. Trata 401 (token ausente/inválido), 404
-    (ticker não encontrado na lista) e 429 (limite excedido — respeita o header
-    Retry-After quando vem e for curto, tenta de novo uma vez só). Nunca lança exceção;
-    devolve sempre (dados_ou_None, erro_ou_None)."""
-    for tentativa in range(2):
-        try:
-            r = requests.get(f"https://brapi.dev{path}", params=params,
-                              headers=_brapi_headers(), timeout=20)
-        except Exception as e:  # noqa: BLE001
-            return None, str(e)
-        if r.status_code == 429:
-            espera = r.headers.get("Retry-After", "")
-            if tentativa == 0 and espera.isdigit() and int(espera) <= 10:
-                time.sleep(int(espera))
+def fetch_historico_yahoo(ticker: str) -> dict:
+    """Preço de fechamento mensal + dividendos de um ticker da B3 (ação, FII ou FII Infra —
+    o Yahoo Finance usa o mesmo sufixo '.SA' pros três, então não precisa separar por
+    classe como a brapi.dev exigia) via yfinance, a mesma lib já usada no projeto pra
+    cotação de ativos em USD. Sem token, sem conta paga, sem limite de ativos por
+    requisição. Devolve {"precos": {mes: preco}, "proventos": {mes: valor_somado},
+    "erro": None|str}."""
+    out = {"precos": {}, "proventos": {}, "erro": None}
+    t = ticker.strip().upper()
+    symbol = yahoo_symbol(t)
+    try:
+        tk = yf.Ticker(symbol)
+        hist = tk.history(period="10y", interval="1mo")
+        for data_idx, preco in hist["Close"].items():
+            if preco is None or preco != preco:  # filtra NaN
                 continue
-            return None, "limite de requisições da brapi.dev excedido — tente de novo em instantes"
-        if r.status_code == 401:
-            return None, ("brapi.dev recusou o token (BRAPI_TOKEN ausente ou inválido) — "
-                           "configure uma chave válida em brapi.dev/dashboard")
-        if r.status_code == 404:
-            return None, "ticker não encontrado na brapi.dev"
-        try:
-            data = r.json()
-        except ValueError:
-            return None, f"resposta inválida da brapi.dev (HTTP {r.status_code})"
-        if isinstance(data, dict) and data.get("error"):
-            return None, data.get("message") or "erro desconhecido na brapi.dev"
-        return data, None
-    return None, "limite de requisições da brapi.dev excedido"
-
-
-def fetch_historico_acoes(tickers: list) -> dict:
-    """Preço de fechamento mensal + dividendos de uma lista de ações, em no máximo 2
-    chamadas (uma de histórico, uma de dividendos) pra lista inteira via 'symbols=A,B,C' —
-    bem mais barato pro Render do que uma chamada por ticker. Devolve {ticker: {"precos":
-    {mes: preco}, "proventos": {mes: valor_somado}, "erro": None|str}}."""
-    out = {t: {"precos": {}, "proventos": {}, "erro": None} for t in tickers}
-    symbols = ",".join(tickers)
-    data, erro = _brapi_get("/api/v2/stocks/historical",
-                             {"symbols": symbols, "range": "10y", "interval": "1mo"})
-    if erro:
-        for t in tickers:
-            out[t]["erro"] = erro
-        return out
-    for res in (data.get("results") or []):
-        t = (res.get("symbol") or res.get("requestedSymbol") or "").upper()
-        if t not in out:
-            continue
-        for ponto in ((res.get("data") or {}).get("historicalDataPrice") or []):
-            if ponto.get("close") is None:
-                continue
-            mes = datetime.utcfromtimestamp(ponto["date"]).strftime("%Y-%m")
-            out[t]["precos"][mes] = ponto["close"]  # ordem crescente — o último do mês fica
-        if not out[t]["precos"]:
-            out[t]["erro"] = "sem histórico de preço retornado pela brapi.dev"
-
-    data_div, erro_div = _brapi_get("/api/v2/stocks/dividends", {"symbols": symbols})
-    if erro_div:
-        return out  # preço já veio; dividendo zerado é só uma perda parcial, não é fatal
-    for res in (data_div.get("results") or []):
-        t = (res.get("symbol") or res.get("requestedSymbol") or "").upper()
-        if t not in out:
-            continue
-        for d in ((res.get("data") or {}).get("cashDividends") or []):
-            data_pag = d.get("paymentDate") or d.get("lastDatePrior")
-            if not data_pag or d.get("rate") is None:
-                continue
-            mes = data_pag[:7]
-            out[t]["proventos"][mes] = out[t]["proventos"].get(mes, 0) + d["rate"]
-    return out
-
-
-def fetch_historico_fiis(tickers: list) -> dict:
-    """Preço + dividendos de uma lista de FIIs (inclui FII Infra). Endpoint próprio da
-    brapi.dev pra fundos — formato de resposta diferente do de ações ('fiis'/'dividends'
-    direto na raiz, sem o wrapper 'results'/'data'), e só devolve preço diário (sem opção
-    de intervalo mensal) — o fechamento mensal é extraído aqui, ficando com o último preço
-    de cada mês."""
-    out = {t: {"precos": {}, "proventos": {}, "erro": None} for t in tickers}
-    symbols = ",".join(tickers)
-    data_ini = (datetime.now() - timedelta(days=365 * 10 + 60)).strftime("%Y-%m-%d")
-    data, erro = _brapi_get("/api/v2/fii/historical",
-                             {"symbols": symbols, "startDate": data_ini, "sortOrder": "asc"})
-    if erro:
-        for t in tickers:
-            out[t]["erro"] = erro
-        return out
-    for serie in (data.get("fiis") or []):
-        t = (serie.get("symbol") or "").upper()
-        if t not in out:
-            continue
-        for ponto in (serie.get("historicalDataPrice") or []):
-            if ponto.get("close") is None:
-                continue
-            mes = datetime.utcfromtimestamp(ponto["date"]).strftime("%Y-%m")
-            out[t]["precos"][mes] = ponto["close"]
-        if not out[t]["precos"]:
-            out[t]["erro"] = "sem histórico de preço retornado pela brapi.dev"
-
-    data_div, erro_div = _brapi_get("/api/v2/fii/dividends",
-                                     {"symbols": symbols, "startDate": data_ini})
-    if erro_div:
-        return out
-    for d in (data_div.get("dividends") or []):
-        t = (d.get("symbol") or "").upper()
-        if t not in out or d.get("rate") is None or not d.get("paymentDate"):
-            continue
-        mes = d["paymentDate"][:7]
-        out[t]["proventos"][mes] = out[t]["proventos"].get(mes, 0) + d["rate"]
+            out["precos"][data_idx.strftime("%Y-%m")] = float(preco)
+        for data_idx, valor in tk.dividends.items():
+            mes = data_idx.strftime("%Y-%m")
+            out["proventos"][mes] = out["proventos"].get(mes, 0) + float(valor)
+        if not out["precos"]:
+            out["erro"] = f"{t}: sem histórico de preço no Yahoo Finance"
+    except Exception as e:  # noqa: BLE001
+        out["erro"] = str(e)
     return out
 
 
 def garantir_historico_tickers(ativos: list) -> dict:
-    """ativos: [{'ticker','classe'}, ...]. Separa ações de FIIs (mesmo critério visual já
-    usado na aba Preço Teto: classe contém 'fii', cobre FII e FII Infra) e faz no máximo
-    2 chamadas em lote pra brapi.dev — só pros tickers que ainda não tiverem o mês fechado
+    """ativos: [{'ticker','classe'}, ...] — 'classe' não é mais usada aqui (o Yahoo Finance
+    não distingue ação de FII), mas o parâmetro fica pra não mudar a assinatura usada em
+    simular_backtest. Busca um ticker de cada vez (sequencial, sem threads — mesma cautela
+    de sempre com o worker único da Render) e só pros que ainda não tiverem o mês fechado
     mais recente em cache. Devolve {ticker: mensagem_de_erro} só pros que falharam."""
     mes_alvo = _mes_anterior(_mes_atual())
     pendentes = []
     for a in ativos:
         t = a["ticker"].strip().upper()
-        if not db.session.query(HistoricoPreco.mes).filter_by(ticker=t, mes=mes_alvo).first():
-            pendentes.append({"ticker": t, "classe": (a.get("classe") or "").lower()})
+        if t not in pendentes and not db.session.query(HistoricoPreco.mes).filter_by(
+                ticker=t, mes=mes_alvo).first():
+            pendentes.append(t)
     erros = {}
     if not pendentes:
         return erros
 
-    fiis = [a["ticker"] for a in pendentes if "fii" in a["classe"]]
-    acoes = [a["ticker"] for a in pendentes if "fii" not in a["classe"]]
-    resultados = {}
-    if acoes:
-        resultados.update(fetch_historico_acoes(acoes))
-    if fiis:
-        resultados.update(fetch_historico_fiis(fiis))
-
+    resultados = {t: fetch_historico_yahoo(t) for t in pendentes}
     for t, dados in resultados.items():
         if not dados["precos"]:
             erros[t] = dados["erro"] or f"{t}: sem dado histórico"
@@ -2034,7 +1935,7 @@ def backtest():
     return render_template("backtest.html", usuario=current_user.nome)
 
 
-# Buscar histórico de vários ativos (brapi.dev) + rodar 10 janelas de simulação, tudo numa
+# Buscar histórico de vários ativos (Yahoo Finance) + rodar 10 janelas de simulação, tudo numa
 # única requisição síncrona, passava fácil dos ~30s de teto do worker da Render gratuita e
 # a Render devolvia a própria página de erro HTML no meio do JSON (quebrando o fetch do
 # navegador) — exatamente o mesmo problema (e a mesma solução) do "Atualizar cotações" do

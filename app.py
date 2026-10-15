@@ -742,10 +742,59 @@ def _serie_mensal_ativo(ticker: str) -> list:
     return serie
 
 
-def simular_backtest(ativos, fundo_di_peso, reinveste):
+def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fundo_di_peso, reinveste):
+    """Roda os meses da janela pra UM cenário de dividendo (reinvestido ou em caixa) e
+    devolve {"pontos", "retorno_pct", "dividendos_recebidos_pct"}. Separado de
+    simular_backtest pra poder rodar os dois cenários reaproveitando o mesmo histórico já
+    buscado — a parte cara é buscar o histórico externo, não essa conta em si."""
+    posicoes = {t: 100.0 * peso for t, peso in
+                ((a["ticker"].strip().upper(), a["peso"] / 100) for a in ativos_validos)}
+    valor_di = 100.0 * (fundo_di_peso / 100)
+    caixa = 0.0
+    valor_cdi = valor_ibov = 100.0
+    dividendos_recebidos = 0.0
+    pontos = [{"mes": meses_janela[0], "carteira": 100.0, "cdi": 100.0, "ibov": 100.0}]
+
+    for i in range(1, len(meses_janela)):
+        mes = meses_janela[i]
+        for t in list(posicoes.keys()):
+            ponto = series_por_mes[t].get(mes)
+            fator = (ponto["fator"] if ponto and ponto["fator"] else 1.0)
+            provento = (ponto["provento"] if ponto else 0) or 0
+            preco_anterior = ponto["preco_anterior"] if ponto else None
+            valor_antes = posicoes[t]
+            posicoes[t] = valor_antes * fator
+            if provento and preco_anterior:
+                # provento é valor por cota; dividido pelo preço do mês anterior dá o
+                # "yield" do mês, aplicado sobre o valor que a posição tinha antes dele
+                divid_valor = valor_antes * (provento / preco_anterior)
+                dividendos_recebidos += divid_valor
+                if reinveste:
+                    posicoes[t] += divid_valor
+                else:
+                    caixa += divid_valor
+        valor_di *= cdi.get(mes, 1.0)
+        valor_cdi *= cdi.get(mes, 1.0)
+        valor_ibov *= ibov.get(mes, 1.0)
+        valor_carteira = sum(posicoes.values()) + valor_di + caixa
+        pontos.append({"mes": mes, "carteira": round(valor_carteira, 4),
+                        "cdi": round(valor_cdi, 4), "ibov": round(valor_ibov, 4)})
+
+    return {
+        "pontos": pontos,
+        "retorno_pct": {"carteira": round(pontos[-1]["carteira"] - 100, 2),
+                        "cdi": round(pontos[-1]["cdi"] - 100, 2),
+                        "ibov": round(pontos[-1]["ibov"] - 100, 2)},
+        "dividendos_recebidos_pct": round(dividendos_recebidos, 2),
+    }
+
+
+def simular_backtest(ativos, fundo_di_peso):
     """ativos: [{"ticker","classe","peso"}, ...] — peso em %, soma com fundo_di_peso ~100%.
     Busca (e cacheia) o histórico necessário e devolve uma janela de 1 a 10 anos, cada uma
-    comparando a carteira simulada (buy and hold, sem rebalancear) contra CDI e Ibovespa."""
+    comparando a carteira simulada (buy and hold, sem rebalancear) contra CDI e Ibovespa —
+    já com os dois cenários de dividendo (reinvestido e em caixa) prontos, pra trocar na
+    tela na hora sem precisar rodar a simulação de novo."""
     avisos_busca = []
     erro_indices = garantir_historico_indices()
     if erro_indices:
@@ -794,50 +843,19 @@ def simular_backtest(ativos, fundo_di_peso, reinveste):
             janelas.append({"anos": anos, "disponivel": False, "avisos": avisos})
             continue
 
-        posicoes = {a["ticker"].strip().upper(): 100.0 * (a["peso"] / 100) for a in ativos_validos}
-        valor_di = 100.0 * (fundo_di_peso / 100)
-        caixa = 0.0
-        valor_cdi = valor_ibov = 100.0
-        dividendos_recebidos = 0.0
-        pontos = [{"mes": meses_janela[0], "carteira": 100.0, "cdi": 100.0, "ibov": 100.0}]
-
         # indexa cada série por mês uma vez, fora do loop (evita repetir "next(... for ...)"
         # a cada mês x cada ativo — isso ficava O(janela x ativos x tamanho_da_série_inteira))
-        series_por_mes = {t: {p["mes"]: p for p in (series_ativos.get(t) or [])}
-                           for t in posicoes}
-
-        for i in range(1, len(meses_janela)):
-            mes = meses_janela[i]
-            for t in list(posicoes.keys()):
-                ponto = series_por_mes[t].get(mes)
-                fator = (ponto["fator"] if ponto and ponto["fator"] else 1.0)
-                provento = (ponto["provento"] if ponto else 0) or 0
-                preco_anterior = ponto["preco_anterior"] if ponto else None
-                valor_antes = posicoes[t]
-                posicoes[t] = valor_antes * fator
-                if provento and preco_anterior:
-                    # provento é valor por cota; dividido pelo preço do mês anterior dá o
-                    # "yield" do mês, aplicado sobre o valor que a posição tinha antes dele
-                    divid_valor = valor_antes * (provento / preco_anterior)
-                    dividendos_recebidos += divid_valor
-                    if reinveste:
-                        posicoes[t] += divid_valor
-                    else:
-                        caixa += divid_valor
-            valor_di *= cdi.get(mes, 1.0)
-            valor_cdi *= cdi.get(mes, 1.0)
-            valor_ibov *= ibov.get(mes, 1.0)
-            valor_carteira = sum(posicoes.values()) + valor_di + caixa
-            pontos.append({"mes": mes, "carteira": round(valor_carteira, 4),
-                            "cdi": round(valor_cdi, 4), "ibov": round(valor_ibov, 4)})
+        series_por_mes = {a["ticker"].strip().upper():
+                           {p["mes"]: p for p in (series_ativos.get(a["ticker"].strip().upper()) or [])}
+                           for a in ativos_validos}
 
         janelas.append({
             "anos": anos, "disponivel": True, "mes_inicio": mes_ini_efetivo, "mes_fim": mes_fim,
-            "avisos": avisos, "pontos": pontos,
-            "retorno_pct": {"carteira": round(pontos[-1]["carteira"] - 100, 2),
-                            "cdi": round(pontos[-1]["cdi"] - 100, 2),
-                            "ibov": round(pontos[-1]["ibov"] - 100, 2)},
-            "dividendos_recebidos_pct": round(dividendos_recebidos, 2),
+            "avisos": avisos,
+            "reinvestido": _simular_cenario(ativos_validos, meses_janela, series_por_mes,
+                                             cdi, ibov, fundo_di_peso, True),
+            "caixa": _simular_cenario(ativos_validos, meses_janela, series_por_mes,
+                                      cdi, ibov, fundo_di_peso, False),
         })
     return {"janelas": janelas, "erro": None}
 
@@ -1945,10 +1963,10 @@ _BACKTEST_LOCK = threading.Lock()
 _BACKTEST_JOBS = {}  # job_id -> {"rodando","resultado","erro","criado_em"}
 
 
-def _rodar_backtest_em_background(job_id, ativos, fundo_di_peso, reinveste):
+def _rodar_backtest_em_background(job_id, ativos, fundo_di_peso):
     with app.app_context():
         try:
-            resultado = simular_backtest(ativos, fundo_di_peso, reinveste)
+            resultado = simular_backtest(ativos, fundo_di_peso)
             with _BACKTEST_LOCK:
                 _BACKTEST_JOBS[job_id].update(rodando=False, resultado=resultado, erro=None)
         except Exception as e:  # noqa: BLE001
@@ -1966,7 +1984,6 @@ def api_backtest_simular():
     data = request.get_json(force=True)
     ativos_in = data.get("ativos") or []
     fundo_di_peso = float(data.get("fundo_di_peso") or 0)
-    reinveste = bool(data.get("reinveste", True))
 
     ativos = []
     for a in ativos_in:
@@ -1995,7 +2012,7 @@ def api_backtest_simular():
             del _BACKTEST_JOBS[jid]
         _BACKTEST_JOBS[job_id] = {"rodando": True, "resultado": None, "erro": None, "criado_em": agora}
     threading.Thread(target=_rodar_backtest_em_background,
-                      args=(job_id, ativos, fundo_di_peso, reinveste), daemon=True).start()
+                      args=(job_id, ativos, fundo_di_peso), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 

@@ -214,6 +214,11 @@
     <div id="comResultado" style="display:none">
       <div class="janelas" id="janelas"></div>
       <div class="resumo-grid" id="resumoGrid"></div>
+      <div class="acoes-form" style="margin-top:0;margin-bottom:6px">
+        <span class="muted" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:700">Ver gráfico em</span>
+        <button class="janela-btn on" id="visaoPct" onclick="setVisao('pct')">Percentual</button>
+        <button class="janela-btn" id="visaoRs" onclick="setVisao('rs')">Patrimônio (R$)</button>
+      </div>
       <div class="chart-wrap"><canvas id="chBackTest"></canvas></div>
       <ul class="avisos" id="avisosJanela"></ul>
     </div>
@@ -225,6 +230,7 @@ let CID = null;
 let LINHAS = [];       // [{ticker, classe, peso}]
 let LINHA_SEQ = 0;
 let REINVESTE = true;
+let VISAO = 'pct'; // 'pct' (índice 100=início) ou 'rs' (patrimônio em reais)
 let RESULTADO = null;  // resposta da última simulação
 let JANELA_ATUAL = null;
 let chBT = null;
@@ -335,6 +341,15 @@ function setReinveste(v){
   REINVESTE = v;
   document.getElementById('optReinveste').classList.toggle('on', v);
   document.getElementById('optCaixa').classList.toggle('on', !v);
+  // os dois cenários (reinvestido e em caixa) já vêm prontos na mesma simulação — só troca
+  // qual deles é exibido, sem precisar rodar tudo de novo no servidor
+  if(RESULTADO) selecionarJanela(JANELA_ATUAL);
+}
+function setVisao(v){
+  VISAO = v;
+  document.getElementById('visaoPct').classList.toggle('on', v==='pct');
+  document.getElementById('visaoRs').classList.toggle('on', v==='rs');
+  if(RESULTADO) selecionarJanela(JANELA_ATUAL);
 }
 
 async function carregarDaCarteira(){
@@ -375,7 +390,7 @@ async function rodarBackTest(){
   try{
     const r = await fetch('/api/backtest/simular', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ativos, fundo_di_peso: pesoDi, reinveste: REINVESTE}),
+      body: JSON.stringify({ativos, fundo_di_peso: pesoDi}),
     });
     const d = await r.json();
     if(!r.ok || d.erro){
@@ -442,10 +457,13 @@ function renderResultado(){
 
 function selecionarJanela(anos){
   JANELA_ATUAL = anos;
-  document.querySelectorAll('.janela-btn').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('#janelas .janela-btn').forEach(b=>b.classList.remove('on'));
   if(anos==null) return;
   document.getElementById(`janela-${anos}`).classList.add('on');
   const j = RESULTADO.janelas.find(x=>x.anos===anos);
+  // os dois cenários (dividendo reinvestido ou em caixa) já vieram prontos da mesma
+  // simulação — só escolhe qual exibir conforme o toggle, sem rodar nada de novo
+  const c = REINVESTE ? j.reinvestido : j.caixa;
 
   const valorIni = valorInicialAtual();
   const BRL = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -456,38 +474,44 @@ function selecionarJanela(anos){
       ${valorIni>0 ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${BRL(valorIni*(1+pct/100))}</div>` : ''}
     </div>`;
   document.getElementById('resumoGrid').innerHTML =
-    tile('Carteira', j.retorno_pct.carteira, true) +
-    tile('CDI', j.retorno_pct.cdi) +
-    tile('Ibovespa', j.retorno_pct.ibov) +
+    tile('Carteira', c.retorno_pct.carteira, true) +
+    tile('CDI', c.retorno_pct.cdi) +
+    tile('Ibovespa', c.retorno_pct.ibov) +
     `<div class="resumo-tile"><div class="lbl">Dividendos recebidos</div>
-       <div class="val">${j.dividendos_recebidos_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
-       ${valorIni>0 ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${BRL(valorIni*j.dividendos_recebidos_pct/100)}</div>` : ''}
+       <div class="val">${c.dividendos_recebidos_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
+       ${valorIni>0 ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${BRL(valorIni*c.dividendos_recebidos_pct/100)}</div>` : ''}
     </div>`;
 
   document.getElementById('avisosJanela').innerHTML =
     (j.avisos||[]).map(a=>`<li>⚠️ ${a}</li>`).join('');
 
-  const labels = j.pontos.map(p=>{
+  const labels = c.pontos.map(p=>{
     const [ano,mes] = p.mes.split('-');
     return `${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+mes-1]}/${ano.slice(2)}`;
   });
+  // em %, o índice já vem pronto (100 = início); em R$, cada ponto vira valorInicial *
+  // índice/100 — é só uma escala, a forma da curva é idêntica nos dois modos
+  const emRs = VISAO==='rs' && valorIni>0;
+  const escala = v => emRs ? (valorIni * v/100) : v;
+  const fmtEixo = v => emRs ? BRL(v) : v.toLocaleString('pt-BR',{maximumFractionDigits:0});
+
   if(chBT) chBT.destroy();
   chBT = new Chart(document.getElementById('chBackTest'), {
     type:'line',
     data:{ labels, datasets:[
-      {label:'Carteira', data:j.pontos.map(p=>p.carteira), borderColor:'#5b8def', backgroundColor:'rgba(91,141,239,.12)', borderWidth:2.5, pointRadius:0, tension:.15},
-      {label:'CDI', data:j.pontos.map(p=>p.cdi), borderColor:'#34d399', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
-      {label:'Ibovespa', data:j.pontos.map(p=>p.ibov), borderColor:'#a78bfa', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
+      {label:'Carteira', data:c.pontos.map(p=>escala(p.carteira)), borderColor:'#5b8def', backgroundColor:'rgba(91,141,239,.12)', borderWidth:2.5, pointRadius:0, tension:.15},
+      {label:'CDI', data:c.pontos.map(p=>escala(p.cdi)), borderColor:'#34d399', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
+      {label:'Ibovespa', data:c.pontos.map(p=>escala(p.ibov)), borderColor:'#a78bfa', borderWidth:1.5, pointRadius:0, borderDash:[4,3], tension:.15},
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index', intersect:false},
       plugins:{ legend:{labels:{color:'#8ca0b3'}},
-        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}`}} },
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtEixo(ctx.parsed.y)}`}} },
       scales:{
         x:{ticks:{color:'#8ca0b3', maxRotation:0, autoSkip:true}, grid:{color:'rgba(255,255,255,.04)'}},
-        y:{ticks:{color:'#8ca0b3', callback:v=>v}, grid:{color:'rgba(255,255,255,.06)'},
-           title:{display:true, text:'Índice (100 = início do período)', color:'#8ca0b3'}},
+        y:{ticks:{color:'#8ca0b3', callback:fmtEixo}, grid:{color:'rgba(255,255,255,.06)'},
+           title:{display:true, text: emRs ? 'Patrimônio (R$)' : 'Índice (100 = início do período)', color:'#8ca0b3'}},
       },
     },
   });

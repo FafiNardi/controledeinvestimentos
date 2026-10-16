@@ -1152,18 +1152,36 @@ def api_add_asset(cid):
               manual=1 if data.get("manual") else 0, ordem=maxord + 1)
     db.session.add(a)
     db.session.commit()
+    # a busca de cotação (Investidor10, às vezes Yahoo Finance de fallback) ficava DENTRO
+    # dessa mesma requisição, depois do ativo já estar salvo — exatamente o problema que o
+    # "Atualizar cotações" (logo abaixo) já teve e resolveu: se a busca demorasse, o proxy da
+    # Render cortava a conexão com erro, o navegador achava que tinha falhado, o usuário
+    # clicava de novo, e aí o ativo (que já tinha sido salvo na tentativa anterior) duplicava.
+    # Agora o ativo é criado na hora (sem preço) e a cotação é buscada em segundo plano.
     if not a.manual:
-        q = fetch_quote(ticker, c.moeda or "BRL")
-        if q["preco"]:
-            a.preco, a.vpa, a.pvp, a.dy = q["preco"], q["vpa"] or 0, q["pvp"] or 0, q["dy"] or 0
-            a.updated_at = datetime.now().isoformat(timespec="seconds")
-        else:
-            # não achou cotação de verdade (ex.: usuário digitou um nome tipo "Fundo DI" ou
-            # "Tesouro Selic 2029", não um ticker de bolsa) — vira editável na hora, senão o
-            # preço fica travado em R$0,00 pra sempre sem nenhum jeito de corrigir
-            a.manual = 1
-        db.session.commit()
+        threading.Thread(target=_buscar_cotacao_ativo_novo_em_background,
+                          args=(a.id, ticker, c.moeda or "BRL"), daemon=True).start()
     return jsonify({"ok": True, "id": a.id})
+
+
+def _buscar_cotacao_ativo_novo_em_background(asset_id, ticker, moeda):
+    with app.app_context():
+        try:
+            q = fetch_quote(ticker, moeda)
+            a = db.session.get(Asset, asset_id)
+            if not a:
+                return  # ativo foi excluído antes da busca terminar
+            if q["preco"]:
+                a.preco, a.vpa, a.pvp, a.dy = q["preco"], q["vpa"] or 0, q["pvp"] or 0, q["dy"] or 0
+                a.updated_at = datetime.now().isoformat(timespec="seconds")
+            else:
+                # não achou cotação de verdade (ex.: usuário digitou um nome tipo "Fundo DI"
+                # ou "Tesouro Selic 2029", não um ticker de bolsa) — vira editável na hora,
+                # senão o preço fica travado em R$0,00 pra sempre sem nenhum jeito de corrigir
+                a.manual = 1
+            db.session.commit()
+        except Exception:  # noqa: BLE001
+            pass  # o ativo já existe com preço 0 — o usuário sempre pode editar na mão
 
 
 EDITABLE = {"ticker", "classe", "segmento", "num_acoes", "preco_medio",

@@ -567,6 +567,11 @@ async function addAsset(){
     }
     ['newTicker','newQtd','newPM','newPct'].forEach(i=>document.getElementById(i).value='');
     await load();
+    // o ativo já volta salvo, mas a cotação de verdade é buscada em segundo plano no
+    // servidor (pro clique não correr risco de "travar" esperando o Investidor10/Yahoo
+    // Finance responder) — esse segundo load recarrega sozinho assim que ela chega,
+    // sem o usuário precisar atualizar a página na mão.
+    setTimeout(load, 2500);
   } catch(e){
     alert('Não consegui falar com o servidor. Confira sua internet e tente de novo.');
   } finally {

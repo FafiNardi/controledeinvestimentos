@@ -116,6 +116,10 @@
   .avisos{margin-top:10px;font-size:12px;color:var(--amber)}
   .avisos li{margin-bottom:3px}
   .erro-sim{color:var(--red);font-size:12.5px;margin-top:10px}
+  .div-ativo-linha{display:flex;justify-content:space-between;align-items:center;
+                    padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .div-ativo-linha:last-child{border-bottom:0}
+  .div-ativo-linha .tick{font-weight:700;font-family:'IBM Plex Mono',monospace}
 
   .em-construcao{border:1px dashed var(--line);border-radius:12px;background:var(--panel);
                   padding:40px 24px;margin-top:10px;text-align:center;color:var(--muted)}
@@ -221,6 +225,7 @@
       </div>
       <div class="chart-wrap"><canvas id="chBackTest"></canvas></div>
       <ul class="avisos" id="avisosJanela"></ul>
+      <div id="divPorAtivo"></div>
     </div>
   </div>
 </div>
@@ -467,19 +472,47 @@ function selecionarJanela(anos){
 
   const valorIni = valorInicialAtual();
   const BRL = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-  const tile = (lbl, pct, destaque) => `
-    <div class="resumo-tile ${destaque?'carteira':''}">
+  // em %, o índice já vem pronto (100 = início); em R$, cada ponto vira valorInicial *
+  // índice/100 — é só uma escala, a forma da curva é idêntica nos dois modos
+  const emRs = VISAO==='rs' && valorIni>0;
+  const escala = v => emRs ? (valorIni * v/100) : v;
+  const fmtEixo = v => emRs ? BRL(v) : v.toLocaleString('pt-BR',{maximumFractionDigits:0});
+  const fmtPct = pct => `${pct>=0?'+':''}${pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%`;
+
+  // o número grande sempre reflete a visão escolhida (% ou R$); o outro vira o detalhe
+  // pequeno embaixo — pedido do Rafael pra não ter que fazer conta de cabeça trocando de visão
+  const tile = (lbl, pct, destaque) => {
+    const principal = emRs ? BRL(valorIni*(1+pct/100)) : fmtPct(pct);
+    const secundario = emRs ? fmtPct(pct) : (valorIni>0 ? BRL(valorIni*(1+pct/100)) : null);
+    return `<div class="resumo-tile ${destaque?'carteira':''}">
       <div class="lbl">${lbl}</div>
-      <div class="val ${pct>=0?'pos':'neg'}">${pct>=0?'+':''}${pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
-      ${valorIni>0 ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${BRL(valorIni*(1+pct/100))}</div>` : ''}
+      <div class="val ${pct>=0?'pos':'neg'}">${principal}</div>
+      ${secundario ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${secundario}</div>` : ''}
     </div>`;
+  };
   document.getElementById('resumoGrid').innerHTML =
     tile('Carteira', c.retorno_pct.carteira, true) +
     tile('CDI', c.retorno_pct.cdi) +
     tile('Ibovespa', c.retorno_pct.ibov) +
-    `<div class="resumo-tile"><div class="lbl">Dividendos recebidos</div>
-       <div class="val">${c.dividendos_recebidos_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
-       ${valorIni>0 ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${BRL(valorIni*c.dividendos_recebidos_pct/100)}</div>` : ''}
+    (()=>{
+      const principal = emRs ? BRL(valorIni*c.dividendos_recebidos_pct/100) : fmtPct(c.dividendos_recebidos_pct).replace('+','');
+      const secundario = emRs ? fmtPct(c.dividendos_recebidos_pct).replace('+','') : (valorIni>0 ? BRL(valorIni*c.dividendos_recebidos_pct/100) : null);
+      return `<div class="resumo-tile"><div class="lbl">Dividendos recebidos</div>
+         <div class="val">${principal}</div>
+         ${secundario ? `<div class="muted" style="font-size:11.5px;margin-top:2px">${secundario}</div>` : ''}
+      </div>`;
+    })();
+
+  // ranking de dividendo por ativo — ajuda a ver qual pagou mais ao longo do período
+  const porAtivo = Object.entries(c.dividendos_por_ativo_pct||{}).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('divPorAtivo').innerHTML = !porAtivo.length ? '' : `
+    <div class="group-label" style="padding-top:20px">Dividendos por ativo</div>
+    <div class="card" style="padding:10px 16px">
+      ${porAtivo.map(([ticker,pct])=>`
+        <div class="div-ativo-linha">
+          <span class="tick">${ticker}</span>
+          <span class="muted">${fmtPct(pct).replace('+','')}${valorIni>0?' · '+BRL(valorIni*pct/100):''}</span>
+        </div>`).join('')}
     </div>`;
 
   document.getElementById('avisosJanela').innerHTML =
@@ -489,11 +522,6 @@ function selecionarJanela(anos){
     const [ano,mes] = p.mes.split('-');
     return `${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+mes-1]}/${ano.slice(2)}`;
   });
-  // em %, o índice já vem pronto (100 = início); em R$, cada ponto vira valorInicial *
-  // índice/100 — é só uma escala, a forma da curva é idêntica nos dois modos
-  const emRs = VISAO==='rs' && valorIni>0;
-  const escala = v => emRs ? (valorIni * v/100) : v;
-  const fmtEixo = v => emRs ? BRL(v) : v.toLocaleString('pt-BR',{maximumFractionDigits:0});
 
   if(chBT) chBT.destroy();
   chBT = new Chart(document.getElementById('chBackTest'), {

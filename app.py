@@ -753,6 +753,7 @@ def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fu
     caixa = 0.0
     valor_cdi = valor_ibov = 100.0
     dividendos_recebidos = 0.0
+    dividendos_por_ativo = {t: 0.0 for t in posicoes}
     pontos = [{"mes": meses_janela[0], "carteira": 100.0, "cdi": 100.0, "ibov": 100.0}]
 
     for i in range(1, len(meses_janela)):
@@ -769,6 +770,7 @@ def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fu
                 # "yield" do mês, aplicado sobre o valor que a posição tinha antes dele
                 divid_valor = valor_antes * (provento / preco_anterior)
                 dividendos_recebidos += divid_valor
+                dividendos_por_ativo[t] += divid_valor
                 if reinveste:
                     posicoes[t] += divid_valor
                 else:
@@ -786,6 +788,7 @@ def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fu
                         "cdi": round(pontos[-1]["cdi"] - 100, 2),
                         "ibov": round(pontos[-1]["ibov"] - 100, 2)},
         "dividendos_recebidos_pct": round(dividendos_recebidos, 2),
+        "dividendos_por_ativo_pct": {t: round(v, 2) for t, v in dividendos_por_ativo.items() if v > 0},
     }
 
 

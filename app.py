@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 import requests
 import yfinance as yf
 from flask import (Flask, jsonify, request, render_template, redirect,
-                   url_for, flash, abort)
+                   url_for, flash, abort, send_file)
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
@@ -1783,6 +1783,208 @@ def api_opcao_editar(oid):
             setattr(o, k, v or "")
     db.session.commit()
     return jsonify({"ok": True})
+
+
+def _premio_total_opcao(o):
+    sinal = -1 if o.operacao == "compra" else 1
+    return sinal * (o.premio or 0) * (o.quantidade or 0)
+
+
+def _custo_total_opcao(o):
+    return (o.custo_recompra or 0) * (o.quantidade or 0)
+
+
+def _resultado_opcao(o):
+    """Mesma fórmula do resultadoOp() em templates/opcoes.html — tem que ficar idêntica
+    às duas, senão o relatório em PDF (gerado aqui no servidor) mostra um número diferente
+    do que a aba já mostra na tela pro usuário."""
+    if (o.status or "aberta") == "aberta":
+        return None
+    resultado = _premio_total_opcao(o)
+    if o.status == "recomprada":
+        resultado -= _custo_total_opcao(o)
+    return resultado
+
+
+def calcular_ir_opcoes(operacoes):
+    """Port exato do calcularIR() de templates/opcoes.html pro Python — precisa existir
+    aqui também porque o relatório em PDF é montado no servidor. Qualquer mudança na
+    fórmula de um lado (alíquota, mínimo de DARF, regra de compensação) tem que ser
+    replicada no outro, senão a tela e o PDF passam a mostrar números diferentes."""
+    fechadas = [o for o in operacoes if (o.status or "aberta") != "aberta"]
+    por_regime_mes = {"comum": {}, "day": {}}
+    for o in fechadas:
+        fech = o.data_fechamento or o.data_vencimento
+        mes = fech[:7] if fech else None
+        if not mes:
+            continue
+        regime = "day" if (o.data_abertura and o.data_abertura == fech) else "comum"
+        por_regime_mes[regime][mes] = por_regime_mes[regime].get(mes, 0) + (_resultado_opcao(o) or 0)
+
+    MINIMO_DARF = 10
+    linhas = []
+    for regime, aliquota in (("comum", 0.15), ("day", 0.20)):
+        prejuizo = 0.0
+        ir_pendente = 0.0
+        for mes in sorted(por_regime_mes[regime]):
+            resultado_mes = por_regime_mes[regime][mes]
+            base = resultado_mes + prejuizo
+            ir_calculado = base * aliquota if base > 0 else 0
+            disponivel = ir_calculado + ir_pendente
+            devido = disponivel if disponivel >= MINIMO_DARF else 0
+            linhas.append({
+                "regime": regime, "mes": mes, "resultado_mes": resultado_mes,
+                "prejuizo_compensado": prejuizo, "base": base, "aliquota": aliquota,
+                "ir_calculado": ir_calculado, "devido": devido,
+            })
+            prejuizo = 0.0 if base > 0 else base
+            ir_pendente = 0.0 if devido > 0 else disponivel
+    linhas.sort(key=lambda l: (l["mes"], l["regime"]))
+    return linhas
+
+
+def _fmt_moeda_pdf(v):
+    neg = v < 0
+    s = f"{abs(v):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return ("-R$ " if neg else "R$ ") + s
+
+
+def _fmt_data_pdf(d):
+    if not d:
+        return "—"
+    try:
+        return datetime.strptime(d, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return d
+
+
+def _fmt_mes_pdf(m):
+    nomes = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+    ano, mes = m.split("-")
+    return f"{nomes[int(mes) - 1]}/{ano}"
+
+
+def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
+    """darfs_pagos: {(mes, regime): DarfPagamento}. Devolve os bytes do PDF pronto."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+                             leftMargin=1.2 * cm, rightMargin=1.2 * cm)
+    styles = getSampleStyleSheet()
+    titulo = ParagraphStyle("titulo", parent=styles["Heading1"], fontSize=15, spaceAfter=2)
+    subtitulo = ParagraphStyle("subtitulo", parent=styles["Normal"], fontSize=9,
+                                textColor=colors.HexColor("#5b6b7c"), spaceAfter=10)
+    secao = ParagraphStyle("secao", parent=styles["Heading2"], fontSize=12, spaceBefore=16, spaceAfter=6)
+    subsecao = ParagraphStyle("subsecao", parent=styles["Heading3"], fontSize=10,
+                               spaceBefore=10, spaceAfter=4)
+    nota = ParagraphStyle("nota", parent=styles["Normal"], fontSize=8,
+                           textColor=colors.HexColor("#5b6b7c"), spaceBefore=14, alignment=TA_LEFT)
+
+    story = [
+        Paragraph("Relatório de Operações com Opções", titulo),
+        Paragraph(f"Carteira: {carteira.nome} &nbsp;·&nbsp; Gerado em "
+                  f"{datetime.now().strftime('%d/%m/%Y às %H:%M')}", subtitulo),
+    ]
+
+    estilo_tabela = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1b2532")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.3),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f4f7")]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d7dee6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ])
+
+    def chave_data(o):
+        return o.data_fechamento or o.data_vencimento or o.data_abertura or ""
+
+    anos = sorted({chave_data(o)[:4] for o in ops if chave_data(o)}
+                  | {l["mes"][:4] for l in linhas_ir}) or [str(datetime.now().year)]
+
+    for ano in anos:
+        story.append(Paragraph(f"Ano-calendário {ano}", secao))
+        ops_ano = [o for o in ops if chave_data(o).startswith(ano)]
+        if ops_ano:
+            dados = [["Ativo", "Tipo", "Operação", "Abertura", "Vencimento", "Fechamento",
+                      "Status", "Qtd", "Prêmio", "Resultado"]]
+            for o in ops_ano:
+                resultado = _resultado_opcao(o)
+                dados.append([
+                    o.ativo, o.tipo, o.operacao.capitalize(), _fmt_data_pdf(o.data_abertura),
+                    _fmt_data_pdf(o.data_vencimento), _fmt_data_pdf(o.data_fechamento),
+                    (o.status or "aberta").capitalize(), f"{o.quantidade or 0:.0f}",
+                    _fmt_moeda_pdf(o.premio or 0),
+                    _fmt_moeda_pdf(resultado) if resultado is not None else "—",
+                ])
+            t = Table(dados, repeatRows=1,
+                      colWidths=[1.6 * cm, 1.1 * cm, 1.5 * cm, 1.8 * cm, 1.8 * cm, 1.8 * cm,
+                                 1.5 * cm, 1 * cm, 1.9 * cm, 1.9 * cm])
+            t.setStyle(estilo_tabela)
+            story.append(t)
+        else:
+            story.append(Paragraph("Nenhuma operação nesse ano.", styles["Normal"]))
+
+        linhas_ano = [l for l in linhas_ir if l["mes"].startswith(ano)]
+        if linhas_ano:
+            story.append(Paragraph("Apuração mensal de Imposto de Renda", subsecao))
+            dados = [["Mês", "Regime", "Resultado do mês", "Prejuízo compensado",
+                      "Base de cálculo", "Alíquota", "IR devido", "Pago?"]]
+            for l in linhas_ano:
+                pago = darfs_pagos.get((l["mes"], l["regime"]))
+                if pago:
+                    status_pago = "Sim — " + _fmt_data_pdf(pago.data_pagamento)
+                elif l["devido"]:
+                    status_pago = "Não"
+                else:
+                    status_pago = "—"
+                dados.append([
+                    _fmt_mes_pdf(l["mes"]), "Comum" if l["regime"] == "comum" else "Day Trade",
+                    _fmt_moeda_pdf(l["resultado_mes"]), _fmt_moeda_pdf(l["prejuizo_compensado"]),
+                    _fmt_moeda_pdf(l["base"]), f"{l['aliquota'] * 100:.0f}%",
+                    _fmt_moeda_pdf(l["devido"]) if l["devido"] else "—", status_pago,
+                ])
+            t2 = Table(dados, repeatRows=1,
+                       colWidths=[1.6 * cm, 2 * cm, 2.7 * cm, 2.7 * cm, 2.4 * cm, 1.6 * cm, 2 * cm, 2.9 * cm])
+            t2.setStyle(estilo_tabela)
+            story.append(t2)
+        story.append(Spacer(1, 4))
+
+    story.append(Paragraph(
+        "Este relatório replica o cálculo já exibido na aba Opções do app: alíquota de 15% no regime "
+        "comum e 20% em day trade (venda e fechamento no mesmo dia), com compensação de prejuízo dentro "
+        "do mesmo regime (prejuízo de day trade não abate imposto do regime comum, e vice-versa) e "
+        "dispensa de recolhimento de DARF abaixo de R$ 10,00 — nesse caso o valor fica acumulado pro mês "
+        "seguinte. <b>Ele não inclui o ganho de capital da venda da ação quando uma CALL é exercida</b> — "
+        "esse valor é tributado separadamente, como venda de ação (inclusive com a isenção de R$ 20 mil "
+        "por mês, que esse aplicativo não calcula hoje). Este documento é um apoio ao seu controle "
+        "pessoal, não um documento fiscal oficial — confirme os valores com um contador antes de declarar.",
+        nota))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@app.route("/api/carteira/<int:cid>/opcoes/relatorio.pdf")
+@login_required
+def api_opcoes_relatorio_pdf(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
+    darfs_pagos = {(d.mes, d.regime): d for d in DarfPagamento.query.filter_by(carteira_id=cid).all()}
+    linhas_ir = calcular_ir_opcoes(ops)
+    pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, darfs_pagos)
+    nome_arquivo = f"opcoes_{c.nome}_{datetime.now().strftime('%Y%m%d')}.pdf" \
+        .replace(" ", "_").replace("/", "-")
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
+                      as_attachment=True, download_name=nome_arquivo)
 
 
 @app.route("/api/carteira/<int:cid>/darfs", methods=["POST"])

@@ -7,3 +7,5 @@ curl_cffi==0.16.3
 gunicorn==26.2.0
 psycopg2-binary==2.9.13
 sqlalchemy==2.1.1
+reportlab==5.0.1
+pillow==13.0.0

@@ -243,6 +243,12 @@
     fica acumulado e soma com o do(s) mês(es) seguinte(s) até bater R$10. Pago via DARF (código
     6015), até o último dia útil do mês seguinte.
   </p>
+  <div class="filtros" style="padding:0 0 12px">
+    <button class="ghost" onclick="baixarRelatorioIR()"
+      title="Baixa um PDF com todas as operações e a apuração mensal de IR, organizado por ano — útil pra declarar e conferir o valor devido">
+      📄 Baixar relatório (PDF)
+    </button>
+  </div>
   <div class="ledger">
     <div class="tbl-scroll">
       <table>
@@ -296,6 +302,13 @@ const charts = {};
 
 const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => v==null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+
+function baixarRelatorioIR(){
+  if(!CID){ alert('Selecione uma carteira primeiro.'); return; }
+  // navegação simples (não fetch) — o servidor manda o PDF com Content-Disposition:
+  // attachment, então o navegador já baixa sozinho, sem precisar lidar com blob aqui
+  window.location.href = `/api/carteira/${CID}/opcoes/relatorio.pdf`;
+}
 
 function toggleTema(){
   const claro = document.documentElement.getAttribute('data-theme')==='light';

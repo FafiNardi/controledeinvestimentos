@@ -1806,12 +1806,80 @@ def _resultado_opcao(o):
     return resultado
 
 
+def _resultado_opcao_para_ir(o):
+    """Port exato do resultadoOpcaoParaIR() em templates/opcoes.html — diferente de
+    _resultado_opcao() (usada na tabela de operações e nas estatísticas), essa versão
+    também exclui 'exercida': quando a opção é exercida, o prêmio não é renda de opção
+    tributável a 15%/20% — numa CALL vira parte do valor de venda da ação (ver
+    calcular_ir_acoes_exercicio), numa PUT abate o preço de compra da ação adquirida (sem
+    fato gerador agora). Usada só dentro de calcular_ir_opcoes."""
+    if (o.status or "aberta") in ("aberta", "exercida"):
+        return None
+    return _resultado_opcao(o)
+
+
+def _lucro_venda_acao(o):
+    """Port de lucroVendaAcao() — só existe pra CALL exercida: lucro da venda da ação
+    (separado do prêmio), (strike - preço médio) × quantidade."""
+    if o.tipo != "CALL" or o.status != "exercida" or not o.preco_medio:
+        return None
+    return (o.strike - o.preco_medio) * (o.quantidade or 0)
+
+
+def _lucro_total_operacao(o):
+    """Port de lucroTotalOperacao() — ganho tributável completo da venda de ação por
+    exercício de CALL: lucro da venda + prêmio recebido (que a Receita soma ao valor de
+    venda nesse caso) - custo de corretagem do exercício."""
+    lv = _lucro_venda_acao(o)
+    if lv is None:
+        return None
+    return lv + _premio_total_opcao(o) - (o.custo_exercicio or 0)
+
+
+def calcular_ir_acoes_exercicio(operacoes):
+    """Port exato do calcularIRAcoesExercicio() de templates/opcoes.html — IR sobre a
+    venda de ações por exercício de CALL, regra de ações comuns (15%, isenção total se a
+    soma das VENDAS do mês ficar até R$20mil — diferente de opções, que nunca têm essa
+    isenção). Sem separar day trade (exercício de opção não é day trade da ação)."""
+    exercidas_call = [o for o in operacoes
+                      if o.tipo == "CALL" and o.status == "exercida" and o.preco_medio]
+    por_mes = {}
+    for o in exercidas_call:
+        fech = o.data_fechamento or o.data_vencimento
+        mes = fech[:7] if fech else None
+        if not mes:
+            continue
+        bucket = por_mes.setdefault(mes, {"vendas": 0.0, "ganho": 0.0})
+        bucket["vendas"] += (o.strike or 0) * (o.quantidade or 0)
+        bucket["ganho"] += (_lucro_total_operacao(o) or 0)
+
+    MINIMO_DARF, ALIQUOTA, LIMITE_ISENCAO_VENDAS = 10, 0.15, 20000
+    linhas = []
+    prejuizo = 0.0
+    ir_pendente = 0.0
+    for mes in sorted(por_mes):
+        vendas, ganho = por_mes[mes]["vendas"], por_mes[mes]["ganho"]
+        isento = vendas <= LIMITE_ISENCAO_VENDAS
+        base = ganho + prejuizo
+        ir_calculado = base * ALIQUOTA if (not isento and base > 0) else 0.0
+        disponivel = ir_calculado + ir_pendente
+        devido = disponivel if disponivel >= MINIMO_DARF else 0.0
+        linhas.append({
+            "mes": mes, "vendas": vendas, "isento": isento, "ganho_mes": ganho,
+            "prejuizo_compensado": prejuizo, "base": base, "ir_calculado": ir_calculado,
+            "devido": devido,
+        })
+        prejuizo = 0.0 if base > 0 else base
+        ir_pendente = 0.0 if devido > 0 else disponivel
+    return linhas
+
+
 def calcular_ir_opcoes(operacoes):
     """Port exato do calcularIR() de templates/opcoes.html pro Python — precisa existir
     aqui também porque o relatório em PDF é montado no servidor. Qualquer mudança na
     fórmula de um lado (alíquota, mínimo de DARF, regra de compensação) tem que ser
     replicada no outro, senão a tela e o PDF passam a mostrar números diferentes."""
-    fechadas = [o for o in operacoes if (o.status or "aberta") != "aberta"]
+    fechadas = [o for o in operacoes if (o.status or "aberta") not in ("aberta", "exercida")]
     por_regime_mes = {"comum": {}, "day": {}}
     for o in fechadas:
         fech = o.data_fechamento or o.data_vencimento
@@ -1819,7 +1887,7 @@ def calcular_ir_opcoes(operacoes):
         if not mes:
             continue
         regime = "day" if (o.data_abertura and o.data_abertura == fech) else "comum"
-        por_regime_mes[regime][mes] = por_regime_mes[regime].get(mes, 0) + (_resultado_opcao(o) or 0)
+        por_regime_mes[regime][mes] = por_regime_mes[regime].get(mes, 0) + (_resultado_opcao_para_ir(o) or 0)
 
     MINIMO_DARF = 10
     linhas = []
@@ -1864,7 +1932,7 @@ def _fmt_mes_pdf(m):
     return f"{nomes[int(mes) - 1]}/{ano}"
 
 
-def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
+def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, linhas_ir_acoes, darfs_pagos):
     """darfs_pagos: {(mes, regime): DarfPagamento}. Devolve os bytes do PDF pronto."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_LEFT
@@ -1907,7 +1975,8 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
         return o.data_fechamento or o.data_vencimento or o.data_abertura or ""
 
     anos = sorted({chave_data(o)[:4] for o in ops if chave_data(o)}
-                  | {l["mes"][:4] for l in linhas_ir}) or [str(datetime.now().year)]
+                  | {l["mes"][:4] for l in linhas_ir}
+                  | {l["mes"][:4] for l in linhas_ir_acoes}) or [str(datetime.now().year)]
 
     for ano in anos:
         story.append(Paragraph(f"Ano-calendário {ano}", secao))
@@ -1955,17 +2024,47 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
                        colWidths=[1.6 * cm, 2 * cm, 2.7 * cm, 2.7 * cm, 2.4 * cm, 1.6 * cm, 2 * cm, 2.9 * cm])
             t2.setStyle(estilo_tabela)
             story.append(t2)
+
+        linhas_acoes_ano = [l for l in linhas_ir_acoes if l["mes"].startswith(ano)]
+        if linhas_acoes_ano:
+            story.append(Paragraph("Imposto de Renda — venda de ações por exercício de CALL", subsecao))
+            dados = [["Mês", "Vendas no mês", "Isenção", "Ganho do mês", "Prejuízo compensado",
+                      "Base de cálculo", "IR devido", "Pago?"]]
+            for l in linhas_acoes_ano:
+                pago = darfs_pagos.get((l["mes"], "acoes"))
+                if pago:
+                    status_pago = "Sim — " + _fmt_data_pdf(pago.data_pagamento)
+                elif l["devido"]:
+                    status_pago = "Não"
+                else:
+                    status_pago = "—"
+                dados.append([
+                    _fmt_mes_pdf(l["mes"]), _fmt_moeda_pdf(l["vendas"]),
+                    "Isento" if l["isento"] else "—", _fmt_moeda_pdf(l["ganho_mes"]),
+                    _fmt_moeda_pdf(l["prejuizo_compensado"]), _fmt_moeda_pdf(l["base"]),
+                    _fmt_moeda_pdf(l["devido"]) if l["devido"] else "—", status_pago,
+                ])
+            t3 = Table(dados, repeatRows=1,
+                       colWidths=[1.6 * cm, 2.2 * cm, 1.6 * cm, 2.2 * cm, 2.5 * cm, 2.2 * cm, 2 * cm, 2.9 * cm])
+            t3.setStyle(estilo_tabela)
+            story.append(t3)
         story.append(Spacer(1, 4))
 
     story.append(Paragraph(
-        "Este relatório replica o cálculo já exibido na aba Opções do app: alíquota de 15% no regime "
-        "comum e 20% em day trade (venda e fechamento no mesmo dia), com compensação de prejuízo dentro "
-        "do mesmo regime (prejuízo de day trade não abate imposto do regime comum, e vice-versa) e "
-        "dispensa de recolhimento de DARF abaixo de R$ 10,00 — nesse caso o valor fica acumulado pro mês "
-        "seguinte. <b>Ele não inclui o ganho de capital da venda da ação quando uma CALL é exercida</b> — "
-        "esse valor é tributado separadamente, como venda de ação (inclusive com a isenção de R$ 20 mil "
-        "por mês, que esse aplicativo não calcula hoje). Este documento é um apoio ao seu controle "
-        "pessoal, não um documento fiscal oficial — confirme os valores com um contador antes de declarar.",
+        "Este relatório replica o cálculo já exibido na aba Opções do app. <b>Opções (venda, "
+        "recompra ou expiração sem exercício):</b> 15% sobre o resultado líquido mensal no regime "
+        "comum, 20% em day trade (venda e fechamento no mesmo dia), com compensação de prejuízo "
+        "dentro do mesmo regime e dispensa de recolhimento de DARF abaixo de R$ 10,00 (valor "
+        "acumulado pro mês seguinte). <b>Venda de ação por exercício de CALL</b> segue a regra de "
+        "venda de ação comum — 15% sobre o ganho (que inclui o prêmio recebido), isento no mês em "
+        "que a soma das vendas de ações (valor vendido, não o lucro) ficar até R$ 20 mil — "
+        "considerando só as vendas geradas por exercício que este aplicativo conhece; se você vendeu "
+        "outras ações no mesmo mês fora daqui, some manualmente antes de confiar no \"Isento\". "
+        "<b>PUT exercida não aparece em nenhuma tabela</b>: o prêmio recebido abate o preço de compra "
+        "da ação adquirida — não há imposto devido agora, só quando essa ação for vendida no futuro "
+        "(e esse app não acompanha vendas de ações fora de opções). Este documento é um apoio ao seu "
+        "controle pessoal, não um documento fiscal oficial — confirme os valores com um contador "
+        "antes de declarar.",
         nota))
 
     doc.build(story)
@@ -1980,7 +2079,8 @@ def api_opcoes_relatorio_pdf(cid):
     ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
     darfs_pagos = {(d.mes, d.regime): d for d in DarfPagamento.query.filter_by(carteira_id=cid).all()}
     linhas_ir = calcular_ir_opcoes(ops)
-    pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, darfs_pagos)
+    linhas_ir_acoes = calcular_ir_acoes_exercicio(ops)
+    pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, linhas_ir_acoes, darfs_pagos)
     nome_arquivo = f"opcoes_{c.nome}_{datetime.now().strftime('%Y%m%d')}.pdf" \
         .replace(" ", "_").replace("/", "-")
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
@@ -1996,7 +2096,7 @@ def api_darf_marcar(cid):
     d = request.get_json(force=True) or {}
     mes = (d.get("mes") or "").strip()
     regime = d.get("regime")
-    if not mes or regime not in ("comum", "day"):
+    if not mes or regime not in ("comum", "day", "acoes"):
         return jsonify({"erro": "informe mês e regime válidos"}), 400
     reg = DarfPagamento.query.filter_by(carteira_id=cid, mes=mes, regime=regime).first()
     if not reg:

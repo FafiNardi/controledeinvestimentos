@@ -241,7 +241,9 @@
     fechamento caírem no mesmo dia (day trade). Prejuízo de um mês abate o lucro dos meses
     seguintes, dentro do mesmo regime. <b>DARF abaixo de R$10 não precisa ser paga</b> — o valor
     fica acumulado e soma com o do(s) mês(es) seguinte(s) até bater R$10. Pago via DARF (código
-    6015), até o último dia útil do mês seguinte.
+    6015), até o último dia útil do mês seguinte. <b>Opção exercida não entra aqui</b> — o
+    prêmio dela segue outra regra (veja a tabela "Venda de ações por exercício" logo abaixo,
+    no caso de CALL; PUT exercida não gera imposto agora, só abate o preço de compra da ação).
   </p>
   <div class="filtros" style="padding:0 0 12px">
     <button class="ghost" onclick="baixarRelatorioIR()"
@@ -260,6 +262,32 @@
         </tr></thead>
         <tbody id="tbodyIR"></tbody>
       </table>
+    </div>
+  </div>
+
+  <div id="secaoIRAcoes" style="display:none">
+    <div class="group-label">Imposto de Renda — venda de ações por exercício de CALL</div>
+    <p class="muted" style="font-size:12px;margin:0 0 12px">
+      Quando uma CALL é exercida, você vende a ação pelo strike — isso é tributado como
+      <b>venda de ação comum</b>, não como opção: 15% sobre o ganho (strike − preço médio,
+      mais o prêmio recebido, menos corretagem do exercício), mas <b>isento se a soma das
+      vendas de ações do mês</b> (não o lucro — o valor vendido) ficar até R$20.000.
+      Isenção, repare, é só sobre as vendas que o app conhece (as geradas por exercício de
+      opção aqui dentro) — se você também vendeu outras ações fora disso no mesmo mês,
+      some manualmente antes de confiar nesse "Isento".
+    </p>
+    <div class="ledger">
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>Mês</th><th>Vendas no mês</th><th>Isenção</th><th>Ganho do mês</th>
+            <th>Prejuízo compensado</th><th>Base de cálculo</th><th>IR calculado</th>
+            <th title="Valor que ainda não bateu R$10 — não precisa pagar agora, some com o próximo mês">Acumulado (&lt; R$10)</th>
+            <th>IR devido (DARF)</th><th>Pagamento</th>
+          </tr></thead>
+          <tbody id="tbodyIRAcoes"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -403,6 +431,18 @@ function lucroTotalOperacao(o){
   if(lv==null) return null;
   return lv + premioTotal(o) - (o.custo_exercicio||0);
 }
+// Só pra apuração de IMPOSTO (calcularIR) — diferente de resultadoOp(), que continua
+// contando o prêmio de uma opção exercida como "resultado da operação" nos cards/tabela
+// (é dinheiro que entrou, faz sentido mostrar). Mas pra IR a Receita trata esse prêmio de
+// um jeito totalmente diferente quando a opção é EXERCIDA: numa CALL, ele vira parte do
+// valor de venda da ação (tributado como venda de ação, não como opção — ver
+// calcularIRAcoesExercicio); numa PUT, ele abate o preço de compra da ação adquirida (não
+// tem fato gerador agora, só mais pra frente quando essa ação for vendida). Em nenhum dos
+// dois casos é "renda de opção" tributável a 15%/20% no mês — por isso excluído aqui.
+function resultadoOpcaoParaIR(o){
+  if(o.status==='aberta' || o.status==='exercida') return null;
+  return resultadoOp(o);
+}
 function retornoPct(o){ // sobre o capital de referência (strike x quantidade)
   const base = (o.strike||0) * (o.quantidade||0);
   if(!base) return null;
@@ -454,6 +494,7 @@ function renderTudo(){
   renderAbertas();
   renderTabela();
   renderIR();
+  renderIRAcoes();
 }
 
 // Regras de IR pra renda variável em opções (sempre tributável, sem a isenção dos R$20mil que
@@ -461,14 +502,14 @@ function renderTudo(){
 // abertura e fechamento caírem no mesmo dia (day trade) — os dois regimes têm compensação de
 // prejuízo separada, um não abate o outro.
 function calcularIR(){
-  const fechadas = (DATA.operacoes||[]).filter(o=>o.status!=='aberta');
+  const fechadas = (DATA.operacoes||[]).filter(o=>o.status!=='aberta' && o.status!=='exercida');
   const porRegimeMes = {comum:{}, day:{}};
   fechadas.forEach(o=>{
     const fech = o.data_fechamento || o.data_vencimento;
     const mes = mesKey(fech);
     if(!mes) return;
     const regime = (o.data_abertura && o.data_abertura===fech) ? 'day' : 'comum';
-    porRegimeMes[regime][mes] = (porRegimeMes[regime][mes]||0) + (resultadoOp(o)||0);
+    porRegimeMes[regime][mes] = (porRegimeMes[regime][mes]||0) + (resultadoOpcaoParaIR(o)||0);
   });
   // A Receita dispensa o recolhimento de DARF abaixo de R$10: o valor não desaparece,
   // fica acumulado (somado ao imposto do(s) mês(es) seguinte(s), dentro do mesmo regime)
@@ -492,6 +533,44 @@ function calcularIR(){
     });
   });
   return linhas.sort((a,b)=> a.mes.localeCompare(b.mes) || a.regime.localeCompare(b.regime));
+}
+
+// Quando uma CALL é exercida, a Receita não trata isso como "renda de opção" — o prêmio
+// recebido vira parte do valor de venda da ação (lucroTotalOperacao), e esse valor segue a
+// regra de AÇÕES COMUNS: 15% sobre o ganho, mas com isenção total se a soma das VENDAS
+// (strike × quantidade, não o lucro) de ações no mês ficar até R$20mil — diferente de
+// opções, que nunca têm essa isenção. Compensação de prejuízo e dispensa de R$10 seguem a
+// mesma lógica do calcularIR(), só que num regime próprio (sem separar "day trade" — o
+// exercício de uma opção não é considerado day trade da ação em si).
+function calcularIRAcoesExercicio(){
+  const exercidasCall = (DATA.operacoes||[]).filter(o=>o.tipo==='CALL' && o.status==='exercida' && o.preco_medio);
+  const porMes = {};
+  exercidasCall.forEach(o=>{
+    const fech = o.data_fechamento || o.data_vencimento;
+    const mes = mesKey(fech);
+    if(!mes) return;
+    const bucket = porMes[mes] || (porMes[mes] = {vendas:0, ganho:0});
+    bucket.vendas += (o.strike||0) * (o.quantidade||0);
+    bucket.ganho += (lucroTotalOperacao(o)||0);
+  });
+  const MINIMO_DARF = 10, ALIQUOTA = 0.15, LIMITE_ISENCAO_VENDAS = 20000;
+  const linhas = [];
+  let prejuizo = 0, irPendente = 0;
+  Object.keys(porMes).sort().forEach(mes=>{
+    const {vendas, ganho} = porMes[mes];
+    const isento = vendas <= LIMITE_ISENCAO_VENDAS;
+    const base = ganho + prejuizo;
+    // isento dispensa o IMPOSTO quando há ganho, mas prejuízo continua sendo controlado
+    // normalmente — a isenção não existe pra "perder" a possibilidade de abater prejuízo
+    const irCalculado = (!isento && base>0) ? base*ALIQUOTA : 0;
+    const disponivel = irCalculado + irPendente;
+    const devido = disponivel >= MINIMO_DARF ? disponivel : 0;
+    linhas.push({mes, vendas, isento, ganhoMes: ganho, prejuizoCompensado: prejuizo, base,
+      irCalculado, irPendenteAnterior: irPendente, devido});
+    prejuizo = base>0 ? 0 : base;
+    irPendente = devido>0 ? 0 : disponivel;
+  });
+  return linhas;
 }
 
 function renderIR(){
@@ -524,6 +603,43 @@ function renderIR(){
       <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
       <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
       <td>${(l.aliquota*100).toFixed(0)}%</td>
+      <td>${BRL(l.irCalculado)}</td>
+      <td class="muted">${(l.devido===0 && (l.irCalculado>0 || l.irPendenteAnterior>0)) ? 'aguardando: '+BRL(l.irCalculado+l.irPendenteAnterior) : '—'}</td>
+      <td><b>${BRL(l.devido)}</b></td>
+      <td>${statusHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderIRAcoes(){
+  const linhas = calcularIRAcoesExercicio();
+  const secao = document.getElementById('secaoIRAcoes');
+  const tb = document.getElementById('tbodyIRAcoes');
+  if(!linhas.length){ secao.style.display = 'none'; return; }
+  secao.style.display = '';
+  tb.innerHTML = linhas.map(l=>{
+    const pago = (DATA.darfs||[]).find(d=>d.mes===l.mes && d.regime==='acoes');
+    let statusHtml = '<span class="muted">—</span>';
+    if(l.devido>0){
+      if(pago){
+        statusHtml = EDIT
+          ? `<button class="mini ghost" style="color:var(--green);border-color:var(--green)"
+               title="Pago em ${fmtData(pago.data_pagamento)} · clique pra desmarcar"
+               onclick="desmarcarDarf(${pago.id})">✓ Pago em ${fmtData(pago.data_pagamento)}</button>`
+          : `<span class="badge po">✓ Pago em ${fmtData(pago.data_pagamento)}</span>`;
+      } else {
+        statusHtml = EDIT
+          ? `<button class="mini ghost" onclick="marcarDarf('${l.mes}','acoes',${l.devido})">Marcar como paga</button>`
+          : `<span class="badge aberta">Pendente</span>`;
+      }
+    }
+    return `<tr>
+      <td>${formatMes(l.mes)}</td>
+      <td>${BRL(l.vendas)}</td>
+      <td>${l.isento ? '<span class="badge po">Isento</span>' : '—'}</td>
+      <td class="${l.ganhoMes>=0?'pos':'neg'}">${BRL(l.ganhoMes)}</td>
+      <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
+      <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
       <td>${BRL(l.irCalculado)}</td>
       <td class="muted">${(l.devido===0 && (l.irCalculado>0 || l.irPendenteAnterior>0)) ? 'aguardando: '+BRL(l.irCalculado+l.irPendenteAnterior) : '—'}</td>
       <td><b>${BRL(l.devido)}</b></td>
@@ -848,6 +964,7 @@ async function editarCampo(id, campo, valor){
     o[campo] = valorNum;
     popularFiltros();
     renderStats(); renderGraficoMes(); renderRanking(); renderDY(); renderAbertas(); renderTabela(); renderIR();
+    renderIRAcoes();
   }
 }
 

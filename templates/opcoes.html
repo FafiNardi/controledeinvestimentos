@@ -125,6 +125,7 @@
   td.ativo-cell input{text-align:left;font-family:inherit;font-weight:700;min-width:90px}
   .addbar{display:flex;justify-content:flex-end;padding:12px 0 4px}
   .empty-row td{text-align:center;color:var(--muted);padding:20px}
+  .total-row td{border-top:2px solid var(--line);background:var(--panel2)}
   .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 0 4px}
   .filtros label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
   .acoes-cell{display:flex;gap:4px;justify-content:flex-end}
@@ -172,7 +173,9 @@
       <table>
         <thead><tr>
           <th>Ativo</th><th>Operação</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
-          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
+          <th>Qtde</th>
+          <th title="Strike × quantidade — o quanto fica reservado/exposto nessa operação">Comprometido</th>
+          <th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
         </tr></thead>
         <tbody id="tbodyAbertasPut"></tbody>
       </table>
@@ -186,7 +189,9 @@
       <table>
         <thead><tr>
           <th>Ativo</th><th>Operação</th><th>Vencimento</th><th>Dias</th><th>Strike</th>
-          <th>Qtde</th><th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
+          <th>Qtde</th>
+          <th title="Strike × quantidade — o quanto fica reservado/exposto nessa operação">Comprometido</th>
+          <th>Prêmio unit.</th><th>Prêmio total</th><th>% s/ strike</th><th>Estratégia</th><th></th>
         </tr></thead>
         <tbody id="tbodyAbertasCall"></tbody>
       </table>
@@ -793,11 +798,12 @@ function renderGrupoAbertas(tipo, idVazio, idBox, idTbody){
     .sort((a,b)=>(a.data_vencimento||'').localeCompare(b.data_vencimento||''));
   document.getElementById(idVazio).style.display = abertas.length ? 'none' : '';
   document.getElementById(idBox).style.display = abertas.length ? '' : 'none';
-  document.getElementById(idTbody).innerHTML = abertas.map(o=>{
+  const linhas = abertas.map(o=>{
     const dias = diasEntre(hoje, o.data_vencimento);
     const pctStrike = o.strike ? (o.premio/o.strike*100) : null;
     const operacao = o.operacao||'venda';
     const estr = descricaoEstrategia(o.tipo, operacao);
+    const comprometido = (o.strike||0) * (o.quantidade||0);
     return `<tr>
       <td><b>${o.ativo}</b></td>
       <td><span class="badge ${operacao}">${operacao==='venda'?'Venda':'Compra'}</span></td>
@@ -805,6 +811,7 @@ function renderGrupoAbertas(tipo, idVazio, idBox, idTbody){
       <td class="${dias!=null && dias<=7 ? 'neg':''}">${dias==null?'—':dias+'d'}</td>
       <td>${BRL(o.strike)}</td>
       <td>${o.quantidade}</td>
+      <td>${BRL(comprometido)}</td>
       <td>${BRL(o.premio)}</td>
       <td>${BRL(premioTotal(o))}</td>
       <td>${pctStrike==null?'—':PCT(pctStrike)}</td>
@@ -814,6 +821,16 @@ function renderGrupoAbertas(tipo, idVazio, idBox, idTbody){
       </td>
     </tr>`;
   }).join('');
+  // soma só do que é "venda" (compromisso de verdade) — uma compra de opção não reserva
+  // capital nenhum, pagou o prêmio e acabou, então não faz sentido somar junto
+  const totalComprometido = abertas.filter(o=>(o.operacao||'venda')==='venda')
+    .reduce((s,o)=>s+(o.strike||0)*(o.quantidade||0), 0);
+  const linhaTotal = abertas.length ? `<tr class="total-row">
+      <td colspan="6" style="text-align:right"><b>Total comprometido (vendas)</b></td>
+      <td><b>${BRL(totalComprometido)}</b></td>
+      <td colspan="5"></td>
+    </tr>` : '';
+  document.getElementById(idTbody).innerHTML = linhas + linhaTotal;
 }
 function renderAbertas(){
   renderGrupoAbertas('PUT', 'abertasPutVazio', 'abertasPutBox', 'tbodyAbertasPut');

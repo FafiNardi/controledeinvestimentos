@@ -948,10 +948,19 @@ async function abrirEncerrar(id){
   const status = mapa[resp.trim()];
   if(!status){ alert('Opção inválida.'); return; }
   let custo = 0, corretagem = 0;
+  // "Pó" e "exercida" só acontecem mesmo no vencimento (opção europeia) — mas recompra é,
+  // por definição, ANTES do vencimento ("fechar antes", o próprio prompt acima já diz
+  // isso). Usar data_vencimento como data_fechamento nesse caso jogava a apuração de
+  // IR/DARF pro mês errado (ela usa data_fechamento pra achar o mês, e compara com
+  // data_abertura pra decidir se foi day trade) — por isso agora pergunta a data real.
+  let dataFechamento = o.data_vencimento;
   if(status==='recomprada'){
     const c = prompt('Quanto você pagou pra recomprar (fechar), por opção?', '0');
     if(c===null) return;
     custo = parseMoeda(c);
+    const d = prompt('Em que data você recomprou (AAAA-MM-DD)?', hojeStr());
+    if(d===null) return;
+    dataFechamento = d.trim() || o.data_vencimento;
   }
   if(status==='exercida'){
     const c = prompt('Quanto a corretora cobrou de corretagem nesse exercício? (valor total da nota, não por opção — deixe 0 se não teve ou se preferir lançar depois)', '0');
@@ -959,7 +968,7 @@ async function abrirEncerrar(id){
     corretagem = parseMoeda(c);
   }
   await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({status, custo_recompra:custo, custo_exercicio:corretagem, data_fechamento:o.data_vencimento})});
+    body: JSON.stringify({status, custo_recompra:custo, custo_exercicio:corretagem, data_fechamento:dataFechamento})});
   await load();
 }
 

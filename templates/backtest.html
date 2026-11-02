@@ -422,6 +422,7 @@ async function aguardarResultado(jobId){
   const btn = document.getElementById('btnRodar');
   const status = document.getElementById('statusSim');
   const erroEl = document.getElementById('erroSim');
+  let terminou = false;
   for(let tentativas=0; tentativas<150; tentativas++){
     await new Promise(res=>setTimeout(res, 1500));
     let d;
@@ -432,17 +433,33 @@ async function aguardarResultado(jobId){
     } catch(e){
       erroEl.textContent = 'Falha ao consultar o andamento da simulação: ' + e.message;
       erroEl.style.display = '';
+      terminou = true;
       break;
     }
     if(d.rodando) continue;
     if(d.erro){
       erroEl.textContent = d.erro;
       erroEl.style.display = '';
+    } else if(d.resultado && d.resultado.erro){
+      // simular_backtest terminou sem lançar exceção (job não marca erro), mas devolveu um
+      // erro próprio dentro do resultado (ex.: não conseguiu buscar CDI/Ibovespa) — sem
+      // isso, o painel ficava mudo: sem janelas, sem gráfico, sem explicação nenhuma
+      erroEl.textContent = d.resultado.erro;
+      erroEl.style.display = '';
     } else {
       RESULTADO = d.resultado;
       renderResultado();
     }
+    terminou = true;
     break;
+  }
+  if(!terminou){
+    // esgotou as 150 tentativas (~3min45s) sem o job terminar — antes o loop só saía em
+    // silêncio, o botão voltava a ficar clicável e o usuário não tinha como saber se
+    // travou, ainda está rodando, ou o quê
+    erroEl.textContent = 'A simulação está demorando mais que o esperado (mais de 3 minutos) — ' +
+      'pode ter travado no servidor. Tente de novo em alguns instantes.';
+    erroEl.style.display = '';
   }
   status.textContent = '';
   btn.disabled = false;

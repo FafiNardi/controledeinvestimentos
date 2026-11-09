@@ -958,7 +958,15 @@ async function abrirEncerrar(id){
     const c = prompt('Quanto você pagou pra recomprar (fechar), por opção?', '0');
     if(c===null) return;
     custo = parseMoeda(c);
-    const d = prompt('Em que data você recomprou (AAAA-MM-DD)?', hojeStr());
+    // valida o formato antes de mandar pro servidor — uma data torta aqui (ex: "20/09/2026"
+    // em vez de "2026-09-20") vira um "mês fantasma" na apuração de IR (calcularIR usa
+    // mesKey(fech), que é só um slice dos 7 primeiros caracteres) sem erro nenhum na hora,
+    // só um número errado aparecendo depois. Backend também valida (defesa em dupla
+    // camada), mas falhar aqui já evita a viagem de rede.
+    let d = prompt('Em que data você recomprou (AAAA-MM-DD)?', hojeStr());
+    while(d!==null && d.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(d.trim())){
+      d = prompt('Data em formato inválido — use AAAA-MM-DD (ex: 2026-09-20):', hojeStr());
+    }
     if(d===null) return;
     dataFechamento = d.trim() || o.data_vencimento;
   }

@@ -1749,6 +1749,7 @@ OPCAO_FIELDS = {"ativo", "tipo", "operacao", "data_abertura", "data_vencimento",
                 "quantidade", "premio", "status", "data_fechamento", "custo_recompra",
                 "preco_medio", "custo_exercicio", "obs"}
 OPCAO_NUM_FIELDS = {"strike", "quantidade", "premio", "custo_recompra", "preco_medio", "custo_exercicio"}
+OPCAO_DATA_FIELDS = {"data_abertura", "data_vencimento", "data_fechamento"}
 
 
 @app.route("/api/opcoes/<int:oid>", methods=["PUT", "DELETE"])
@@ -1763,6 +1764,18 @@ def api_opcao_editar(oid):
         db.session.commit()
         return jsonify({"ok": True})
     d = request.get_json(force=True) or {}
+    # data inválida aqui não dá erro nenhum na hora — só vira uma string esquisita salva em
+    # data_fechamento, que quebra a apuração de IR em silêncio depois (calcular_ir_opcoes
+    # usa fech[:7] pra achar o mês; "20/09/2026"[:7] vira "20/09/2", um mês fantasma que
+    # nunca bate com nada). Validado ANTES de aplicar qualquer campo, pra um valor inválido
+    # rejeitar o PUT inteiro em vez de corromper só esse campo sem avisar ninguém.
+    for campo in OPCAO_DATA_FIELDS:
+        valor = d.get(campo)
+        if valor:
+            try:
+                datetime.strptime(valor, "%Y-%m-%d")
+            except ValueError:
+                return jsonify({"erro": f"data inválida em '{campo}': use o formato AAAA-MM-DD"}), 400
     for k, v in d.items():
         if k not in OPCAO_FIELDS:
             continue

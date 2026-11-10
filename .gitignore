@@ -1,0 +1,16 @@
+# Ambiente local — nao vai pro GitHub
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+
+# DADOS DOS USUARIOS — este repositorio e PUBLICO.
+# O carteira.db tem os cadastros e a carteira de cada pessoa.
+# Nunca remova esta linha.
+carteira.db
+seed_carteira.json
+
+# Pasta antiga de deploy (jun/2026) e script que faz login no site
+carteira-deploy/
+importar_para_nuvem.py

@@ -2328,7 +2328,15 @@ def api_backtest_simular():
     carteira_id nem checagem de dono."""
     data = request.get_json(force=True)
     ativos_in = data.get("ativos") or []
-    fundo_di_peso = float(data.get("fundo_di_peso") or 0)
+    try:
+        fundo_di_peso = float(data.get("fundo_di_peso") or 0)
+    except (TypeError, ValueError):
+        fundo_di_peso = 0
+    # negativo aqui "disfarça" a validação de soma ~100% logo abaixo — compensaria o peso
+    # dos ativos e passaria como se a soma batesse 100%, só que com um "fundo DI" negativo
+    # sem sentido físico nenhum entrando na simulação
+    if fundo_di_peso < 0:
+        fundo_di_peso = 0
 
     ativos = []
     for a in ativos_in:

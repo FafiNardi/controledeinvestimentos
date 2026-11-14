@@ -1441,7 +1441,13 @@ function mov(ativoId, campo, valor){
   // keepalive garante que o salvamento termine mesmo se o usuário sair da página logo em seguida
   fetch('/api/rent/mov',{method:'PUT',headers:{'Content-Type':'application/json'},keepalive:true,
     body: JSON.stringify({ativo_id:ativoId, ano:ANO, mes:MES, [campo]: smartNum(valor)})})
-    .catch(()=>console.error('Falha ao salvar', campo, ativoId));
+    .then(r=>{
+      // sem isso, só console.error — o campo digitado ficava na tela como se tivesse
+      // salvo, e só se corrigia sozinho ~1,5s depois (na sincronização em segundo plano),
+      // sem o usuário entender por quê o número "voltou"
+      if(!r.ok) alert('Não consegui salvar esse valor — a tabela vai voltar ao que estava salvo em instantes.');
+    })
+    .catch(()=>alert('Falha de rede ao salvar — a tabela vai voltar ao que estava salvo em instantes.'));
   agendarSincronizacao();
 }
 let _syncTimer = null;

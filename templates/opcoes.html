@@ -927,8 +927,25 @@ const CAMPOS_MOEDA = ['strike','premio','custo_recompra','preco_medio','custo_ex
 async function editarCampo(id, campo, valor){
   const valorNum = CAMPOS_MOEDA.includes(campo) ? parseMoeda(valor)
                   : campo==='quantidade' ? parseFloat(valor||0) : valor;
-  await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({[campo]:valorNum})});
+  let ok = false;
+  try{
+    const r = await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({[campo]:valorNum})});
+    ok = r.ok;
+    if(!ok){
+      const d = await r.json().catch(()=>({}));
+      alert('Não consegui salvar: ' + (d.erro || 'erro '+r.status) + '\n\nRecarregando a tabela com o valor que estava salvo.');
+    }
+  } catch(e){
+    alert('Falha de rede ao salvar — recarregando a tabela com o valor que estava salvo.');
+  }
+  if(!ok){
+    // sem isso, a tela ficava mostrando o valor que o usuário digitou como se tivesse sido
+    // salvo (atualização otimista) mesmo quando o servidor recusou (ex.: data inválida) —
+    // só um F5 revelava que na verdade nada tinha sido gravado
+    await load();
+    return;
+  }
   const o = (DATA.operacoes||[]).find(x=>x.id===id);
   if(o){
     o[campo] = valorNum;

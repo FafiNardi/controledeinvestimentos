@@ -970,13 +970,30 @@ async function abrirEncerrar(id){
     if(d===null) return;
     dataFechamento = d.trim() || o.data_vencimento;
   }
+  let precoMedio = null;
   if(status==='exercida'){
     const c = prompt('Quanto a corretora cobrou de corretagem nesse exercício? (valor total da nota, não por opção — deixe 0 se não teve ou se preferir lançar depois)', '0');
     if(c===null) return;
     corretagem = parseMoeda(c);
+    if(o.tipo==='CALL'){
+      // sem isso, o prêmio dessa CALL não entra em NENHUMA apuração de IR: resultadoOpcaoParaIR
+      // já exclui toda opção exercida de propósito (o prêmio dela tem que virar venda de ação,
+      // não renda de opção), mas calcularIRAcoesExercicio() só considera essa venda se
+      // preco_medio estiver preenchido — sem ele, o dinheiro simplesmente não é tributado em
+      // lugar nenhum. Perguntar aqui, na hora, evita depender do usuário lembrar de editar a
+      // célula na tabela depois.
+      let pm = prompt('Preço médio da ação ANTES do exercício (pra calcular o lucro da venda)?', o.preco_medio || '0');
+      if(pm===null) return;
+      precoMedio = parseMoeda(pm);
+      if(!precoMedio){
+        alert('Preço médio em branco ou zero — o prêmio dessa CALL exercida vai ficar de fora da apuração de IR até você preencher esse valor na tabela do histórico.');
+      }
+    }
   }
+  const campos = {status, custo_recompra:custo, custo_exercicio:corretagem, data_fechamento:dataFechamento};
+  if(precoMedio!=null) campos.preco_medio = precoMedio;
   await fetch('/api/opcoes/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({status, custo_recompra:custo, custo_exercicio:corretagem, data_fechamento:dataFechamento})});
+    body: JSON.stringify(campos)});
   await load();
 }
 

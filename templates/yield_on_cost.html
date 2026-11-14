@@ -199,8 +199,16 @@ async function trocarCarteira(){
 }
 
 async function load(){
-  const r = await fetch('/api/carteira/'+CID+'/yield-on-cost');
-  DATA = await r.json();
+  // sem isso, uma falha de rede deixava a tela com os dados da carteira ANTERIOR
+  // enquanto o seletor já mostrava a carteira nova escolhida — sem nenhum aviso
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/yield-on-cost');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    DATA = await r.json();
+  } catch(e){
+    alert('Não consegui carregar essa carteira (falha de rede ou servidor). Tente de novo.');
+    return;
+  }
   MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
   popularFiltroClasse();
   renderStats();

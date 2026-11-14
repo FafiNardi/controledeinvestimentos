@@ -218,13 +218,13 @@
       <tr class="addrow">
         <td><input id="newTicker" placeholder="+ Ticker (ex: ITUB4)" style="text-align:left"></td>
         <td colspan="4" class="muted" style="text-align:left">Renda fixa? digite um nome e edite o preço manualmente</td>
-        <td><input id="newQtd" type="number" placeholder="Qtd" style="text-align:left"></td>
-        <td><input id="newPM" type="number" placeholder="Preço médio" style="text-align:left"></td>
+        <td><input id="newQtd" type="number" min="0" placeholder="Qtd" style="text-align:left"></td>
+        <td><input id="newPM" type="number" min="0" placeholder="Preço médio" style="text-align:left"></td>
         <td></td>
         <td><select id="newClasse"></select></td>
         <td><select id="newSeg"></select></td>
         <td id="totalTenho" class="muted" style="font-weight:600"></td>
-        <td><input id="newPct" type="number" placeholder="% ideal" style="text-align:left"></td>
+        <td><input id="newPct" type="number" min="0" max="100" placeholder="% ideal" style="text-align:left"></td>
         <td></td>
         <td></td>
         <td id="totalFalta" class="muted" style="font-weight:600"></td>
@@ -424,7 +424,7 @@ function renderRows(){
     return `<tr data-id="${a.id}">
       <td><span class="tick">${a.ticker}</span></td>
       <td>${a.manual
-            ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="${MOEDA==='USD'?'US$ 0,00':'R$ 0,00'}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',smartNum(this.value))">`
+            ? `<input type="text" value="${a.preco?BRL(a.preco):''}" placeholder="${MOEDA==='USD'?'US$ 0,00':'R$ 0,00'}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'preco',Math.max(0,smartNum(this.value)))"`
             : (a.preco ? BRL(a.preco)
               : (EDIT ? `<button class="ghost" style="padding:3px 8px;font-size:11px" title="Não achei cotação pra esse ticker — clique pra poder digitar o preço na mão" onclick="definirPrecoManual(${a.id})">Definir preço</button>` : '—'))}</td>
       <td><input type="text" class="vpa-inp" value="${a.vpa?BRL(a.vpa):''}" placeholder="—" ${dis} onfocus="this.select()" onchange="updVpa(${a.id},this.value)"></td>
@@ -436,7 +436,7 @@ function renderRows(){
       <td><select ${dis} onchange="upd(${a.id},'classe',this.value)" data-classe></select></td>
       <td><select ${dis} onchange="upd(${a.id},'segmento',this.value)" data-seg></select></td>
       <td>${BRL(a.tenho)}</td>
-      <td class="pct-cell"><input type="text" class="pct-inp" value="${a.pct_ideal?fmtPct(a.pct_ideal):''}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'pct_ideal',smartNum(this.value))"></td>
+      <td class="pct-cell"><input type="text" class="pct-inp" value="${a.pct_ideal?fmtPct(a.pct_ideal):''}" ${dis} onfocus="this.select()" onchange="upd(${a.id},'pct_ideal',Math.min(100,Math.max(0,smartNum(this.value))))"></td>
       <td>${NUM(a.pct_tenho)}%</td>
       <td>${BRL(a.quero)}</td>
       <td class="${a.falta>=0?'':'neg'}">${BRL(a.falta)}</td>
@@ -475,7 +475,7 @@ function atualizarQtd(id, inputEl, classe){
 }
 // Preço Médio: sempre 2 casas, igual ao formato da coluna Preço — independe da classe
 function atualizarPrecoMedio(id, inputEl){
-  const num = Math.round(smartNum(inputEl.value)*100)/100;
+  const num = Math.max(0, Math.round(smartNum(inputEl.value)*100)/100);
   inputEl.value = num || '';
   upd(id, 'preco_medio', num);
 }

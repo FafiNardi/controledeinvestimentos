@@ -1733,6 +1733,18 @@ def api_opcoes_add(cid):
     require_owner(c)
     d = request.get_json(force=True) or {}
     hoje = datetime.now().strftime("%Y-%m-%d")
+    # mesma validação do PUT de edição (ver OPCAO_DATA_FIELDS mais abaixo) — faltava aqui,
+    # deixando a operação já nascer com uma data fora de AAAA-MM-DD se viesse de uma chamada
+    # direta à API (o <input type="date"> do navegador evita isso na tela normal, mas não
+    # é a única porta de entrada). Sem essa trava, calcular_ir_opcoes corrompe o mês em
+    # silêncio via fech[:7] — exatamente o bug que o PUT já corrige do outro lado.
+    for campo in ("data_abertura", "data_vencimento"):
+        valor = d.get(campo)
+        if valor:
+            try:
+                datetime.strptime(valor, "%Y-%m-%d")
+            except ValueError:
+                return jsonify({"erro": f"data inválida em '{campo}': use o formato AAAA-MM-DD"}), 400
     o = OpcaoOp(carteira_id=cid, ativo=(d.get("ativo") or "").strip().upper(),
                 tipo=d.get("tipo") if d.get("tipo") in ("PUT", "CALL") else "PUT",
                 operacao=d.get("operacao") if d.get("operacao") in ("venda", "compra") else "venda",

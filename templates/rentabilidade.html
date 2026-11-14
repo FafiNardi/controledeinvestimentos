@@ -188,6 +188,9 @@
   .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
             box-shadow:0 1px 2px rgba(0,0,0,.1)}
   .chartbox h3{margin:0 0 10px;font-size:12.5px;color:var(--txt);font-weight:700}
+  .indices-toggle{display:flex;gap:14px;margin:-4px 0 10px;flex-wrap:wrap}
+  .indices-toggle label{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer}
+  .indices-toggle input{cursor:pointer}
   .chartbox.full{grid-column:1/-1}
   /* Altura fixa (não proporcional à largura) — sem isso, num monitor largo ou com zoom do
      navegador diferente de 100%, o Chart.js deixa o gráfico enorme e a tela passa a exigir
@@ -319,6 +322,11 @@
         <option value="120">120 meses</option>
       </select>
     </h3>
+    <div class="indices-toggle">
+      <label><input type="checkbox" id="chkCDI" onchange="toggleIndice()"> CDI</label>
+      <label><input type="checkbox" id="chkIBOV" onchange="toggleIndice()"> Ibovespa</label>
+      <label><input type="checkbox" id="chkIFIX" onchange="toggleIndice()"> IFIX</label>
+    </div>
     <div class="chart-wrap"><canvas id="chAcumJanela"></canvas></div>
   </div>
   <div class="chartbox">
@@ -546,6 +554,7 @@ function smartNum(s){
 }
 
 let DATA = null, CID = null, EDIT = false;
+let INDICES = {CDI:{}, IBOV:{}, IFIX:{}}; // fator mensal — dado compartilhado, não é por carteira
 let ANO = new Date().getFullYear(), MES = new Date().getMonth()+1;
 let ORD_CAMPO = '';   // '' = ordem original, 'nome' ou 'classe'
 let ORD_DIR = 1;       // 1 = A-Z, -1 = Z-A
@@ -990,8 +999,27 @@ async function trocarCarteira(){
   await load();
 }
 
+async function toggleIndice(){
+  // só precisa esperar o fetch na primeira vez que algum checkbox é marcado — depois disso
+  // carregarIndices() já sai na hora (_indicesCarregados=true), sem travar o clique
+  await carregarIndices();
+  renderCharts();
+}
+let _indicesCarregados = false;
+async function carregarIndices(){
+  // CDI/Ibovespa/IFIX são compartilhados entre todo mundo (não mudam por carteira) — busca
+  // uma vez só por carregamento de página, não a cada troca de carteira/renderização
+  if(_indicesCarregados) return;
+  try{
+    const r = await fetch('/api/indices-mensais');
+    if(r.ok) INDICES = await r.json();
+  } catch(e){ /* checkboxes de índice só ficam sem dado — resto da tela funciona normal */ }
+  _indicesCarregados = true;
+}
+
 async function load(){
   carregarSelecaoProv(); // busca a seleção de classes/ativos salva pra essa carteira (ou null = ainda não mexeu, mostra tudo)
+  carregarIndices();
   const r = await fetch('/api/carteira/'+CID+'/rent');
   DATA = await r.json();
   EDIT = DATA.editavel;
@@ -1315,16 +1343,42 @@ function renderCharts(){
         tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
-  // 3b. acumulado histórico com janela de meses selecionável (Tudo, ou 24 a 120)
+  // 3b. acumulado histórico com janela de meses selecionável (Tudo, ou 24 a 120), com CDI/
+  // Ibovespa/IFIX como linhas opcionais sobrepostas (mesma base 100 no primeiro mês da
+  // janela, compondo o fator mensal de cada índice mês a mês — igual ao BackTest faz)
   const janelaValor = document.getElementById('selJanela').value;
   const keysJanela = janelaValor ? keys.slice(-parseInt(janelaValor)) : keys;
-  mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
-    datasets:[{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:pontoCorAcumulado,
+  function serieIndice(indice){
+    // devolve PONTOS PERCENTUAIS acumulados (0 = início), mesma escala do dataset da
+    // carteira (DATA.meses[k].acumulado*100) — não um índice base-100, senão as duas
+    // linhas ficariam em escalas diferentes no mesmo eixo Y
+    const fatores = INDICES[indice] || {};
+    let fatorAcum = 1;
+    return keysJanela.map((k,i)=>{
+      if(i>0) fatorAcum *= (fatores[k] != null ? fatores[k] : 1); // sem dado nesse mês = linha fica "parada" ali
+      return (fatorAcum - 1) * 100;
+    });
+  }
+  const datasetsAcum = [{data:keysJanela.map(k=>DATA.meses[k].acumulado*100),borderColor:'#3b82f6',pointBackgroundColor:pontoCorAcumulado,
       backgroundColor:'rgba(59,130,246,.12)',fill:true,pointRadius:2,pointHoverRadius:5,tension:.2,
-      segment:{borderColor:segCorLinha,backgroundColor:segCorArea}}]},
+      label:'Carteira', segment:{borderColor:segCorLinha,backgroundColor:segCorArea}}];
+  const ESTILO_INDICE = {
+    CDI: {cor:'#34d399', label:'CDI'},
+    IBOV: {cor:'#a78bfa', label:'Ibovespa'},
+    IFIX: {cor:'#f5b754', label:'IFIX'},
+  };
+  Object.keys(ESTILO_INDICE).forEach(indice=>{
+    if(!document.getElementById('chk'+indice).checked) return;
+    const est = ESTILO_INDICE[indice];
+    datasetsAcum.push({data:serieIndice(indice), borderColor:est.cor, backgroundColor:'transparent',
+      fill:false, pointRadius:0, borderWidth:1.5, borderDash:[4,3], tension:.2, label:est.label});
+  });
+  const algumIndiceMarcado = Object.keys(ESTILO_INDICE).some(i=>document.getElementById('chk'+i).checked);
+  mkChart('chAcumJanela',{type:'line',data:{labels:keysJanela.map(k=>{const[a,m]=k.split('-');return MESES[+m-1]+'/'+a.slice(2);}),
+    datasets:datasetsAcum},
     options:{maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>fmtPctChart(ctx.parsed.y)}}},
+      plugins:{legend:{display:algumIndiceMarcado, labels:{color:'#8a9bb0', boxWidth:12, font:{size:10.5}}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtPctChart(ctx.parsed.y)}`}}},
       scales:{x:{grid:GRID,ticks:{...TICKS,maxTicksLimit:14}},
         y:{grid:GRID,ticks:{...TICKS,callback:fmtPctChart}}}}});
   // 3c. patrimônio (R$) com a mesma janela de meses selecionável do gráfico acima —

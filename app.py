@@ -705,12 +705,43 @@ def fetch_ibov_mensal_fator() -> dict:
     return out
 
 
+def fetch_ifix_mensal_fator() -> dict:
+    """Fator de retorno mensal do IFIX (índice de fundos imobiliários da B3) via yfinance.
+    O Yahoo Finance não cobre bem o índice bruto (^IFIX/IFIX.SA devolvem só 1-2 pontos) —
+    usa o ETF XFIX11 (replica o IFIX, sem taxa relevante pro que interessa aqui: a FORMA da
+    curva) como substituto, com histórico de verdade desde dez/2020. Meses anteriores a
+    isso simplesmente não têm fator (tratado como "sem dado" por quem usa, igual a
+    qualquer outro índice/ticker sem histórico no restante do app)."""
+    out = {"fatores": {}, "erro": None}
+    try:
+        tk = yf.Ticker("XFIX11.SA")
+        hist = tk.history(period="10y", interval="1mo")
+        fechamentos = {}
+        for data_idx, preco in hist["Close"].items():
+            if preco is None or preco != preco:
+                continue
+            fechamentos[data_idx.strftime("%Y-%m")] = float(preco)
+        meses_ordenados = sorted(fechamentos.keys())
+        fatores, anterior = {}, None
+        for mes in meses_ordenados:
+            if anterior is not None:
+                fatores[mes] = fechamentos[mes] / fechamentos[anterior]
+            anterior = mes
+        out["fatores"] = fatores
+        if not fatores:
+            out["erro"] = "Yahoo Finance não retornou dados do IFIX (XFIX11)"
+    except Exception as e:  # noqa: BLE001
+        out["erro"] = str(e)
+    return out
+
+
 def garantir_historico_indices():
-    """Garante HistoricoIndice (CDI e IBOV) cacheado até o mês fechado mais recente —
+    """Garante HistoricoIndice (CDI, IBOV e IFIX) cacheado até o mês fechado mais recente —
     mesma lógica de 'só busca se faltar' do garantir_historico_ticker."""
     mes_alvo = _mes_anterior(_mes_atual())
     erros = []
-    for indice, fetcher in (("CDI", fetch_cdi_mensal_fator), ("IBOV", fetch_ibov_mensal_fator)):
+    for indice, fetcher in (("CDI", fetch_cdi_mensal_fator), ("IBOV", fetch_ibov_mensal_fator),
+                             ("IFIX", fetch_ifix_mensal_fator)):
         if db.session.query(HistoricoIndice.mes).filter_by(indice=indice, mes=mes_alvo).first():
             continue
         dados = fetcher()
@@ -725,6 +756,21 @@ def garantir_historico_indices():
                 db.session.add(HistoricoIndice(indice=indice, mes=mes, fator=fator))
         db.session.commit()
     return "; ".join(erros) or None
+
+
+@app.route("/api/indices-mensais")
+@login_required
+def api_indices_mensais():
+    """Fator de retorno mensal de CDI/Ibovespa/IFIX — dado compartilhado (não depende de
+    carteira nem usuário), cacheado em HistoricoIndice. Usado pela aba Rentabilidade pra
+    sobrepor essas linhas no gráfico de retorno acumulado, opcionalmente."""
+    erro = garantir_historico_indices()
+    out = {}
+    for indice in ("CDI", "IBOV", "IFIX"):
+        out[indice] = {h.mes: h.fator for h in HistoricoIndice.query.filter_by(indice=indice).all()}
+    if erro:
+        out["erro"] = erro
+    return jsonify(out)
 
 
 def _serie_mensal_ativo(ticker: str) -> list:

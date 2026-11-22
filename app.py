@@ -715,7 +715,7 @@ def fetch_ifix_mensal_fator() -> dict:
     out = {"fatores": {}, "erro": None}
     try:
         tk = yf.Ticker("XFIX11.SA")
-        hist = tk.history(period="10y", interval="1mo")
+        hist = tk.history(period="10y", interval="1mo", timeout=20)
         fechamentos = {}
         for data_idx, preco in hist["Close"].items():
             if preco is None or preco != preco:
@@ -748,14 +748,39 @@ def garantir_historico_indices():
         if not dados["fatores"]:
             erros.append(f"{indice}: {dados['erro']}")
             continue
-        for mes, fator in dados["fatores"].items():
-            existente = HistoricoIndice.query.filter_by(indice=indice, mes=mes).first()
-            if existente:
-                existente.fator = fator
-            else:
-                db.session.add(HistoricoIndice(indice=indice, mes=mes, fator=fator))
-        db.session.commit()
+        try:
+            # o try precisa envolver o loop INTEIRO, não só o commit final: o autoflush do
+            # SQLAlchemy pode disparar o IntegrityError já dentro de um .first() comum (pra
+            # resolver a consulta, ele descarrega sozinho os adds pendentes da iteração
+            # anterior) — testado forçando duas threads reais disputando a mesma corrida,
+            # só um try ao redor do commit deixava a exceção escapar sem ser pega
+            for mes, fator in dados["fatores"].items():
+                existente = HistoricoIndice.query.filter_by(indice=indice, mes=mes).first()
+                if existente:
+                    existente.fator = fator
+                else:
+                    db.session.add(HistoricoIndice(indice=indice, mes=mes, fator=fator))
+            db.session.commit()
+        except IntegrityError:
+            # duas threads (ex.: o job do BackTest e o refresh de /api/indices-mensais)
+            # tentando cachear o mesmo índice/mês quase juntas — quem ganhou a corrida já
+            # salvou o fator certo, essa tentativa só é descartada
+            db.session.rollback()
     return "; ".join(erros) or None
+
+
+_INDICES_LOCK = threading.Lock()
+_INDICES_ATUALIZANDO = False
+
+
+def _atualizar_indices_em_background():
+    global _INDICES_ATUALIZANDO
+    with app.app_context():
+        try:
+            garantir_historico_indices()
+        finally:
+            with _INDICES_LOCK:
+                _INDICES_ATUALIZANDO = False
 
 
 @app.route("/api/indices-mensais")
@@ -763,13 +788,32 @@ def garantir_historico_indices():
 def api_indices_mensais():
     """Fator de retorno mensal de CDI/Ibovespa/IFIX — dado compartilhado (não depende de
     carteira nem usuário), cacheado em HistoricoIndice. Usado pela aba Rentabilidade pra
-    sobrepor essas linhas no gráfico de retorno acumulado, opcionalmente."""
-    erro = garantir_historico_indices()
+    sobrepor essas linhas no gráfico de retorno acumulado, opcionalmente.
+
+    NUNCA busca na própria requisição (ao contrário da primeira versão disso): com gunicorn
+    de 1 worker síncrono, se o BACEN/Yahoo/yfinance travasse aqui dentro, travava o app
+    inteiro pra todo mundo até o timeout do worker matar o processo — o mesmo problema que
+    _REFRESH_JOBS/_BACKTEST_JOBS já tiveram e resolveram rodando em thread à parte. Serve
+    sempre o que já está em cache na hora, e dispara a atualização em segundo plano se
+    faltar o mês mais recente (sem bloquear essa resposta nem as de ninguém)."""
+    global _INDICES_ATUALIZANDO
+    mes_alvo = _mes_anterior(_mes_atual())
+    falta_algum = any(
+        not db.session.query(HistoricoIndice.mes).filter_by(indice=i, mes=mes_alvo).first()
+        for i in ("CDI", "IBOV", "IFIX")
+    )
+    if falta_algum:
+        with _INDICES_LOCK:
+            ja_rodando = _INDICES_ATUALIZANDO
+            _INDICES_ATUALIZANDO = True
+        if not ja_rodando:
+            threading.Thread(target=_atualizar_indices_em_background, daemon=True).start()
+
     out = {}
     for indice in ("CDI", "IBOV", "IFIX"):
         out[indice] = {h.mes: h.fator for h in HistoricoIndice.query.filter_by(indice=indice).all()}
-    if erro:
-        out["erro"] = erro
+    if falta_algum:
+        out["atualizando"] = True
     return jsonify(out)
 
 
@@ -1739,6 +1783,20 @@ def api_rent_mov():
 @login_required
 def opcoes():
     return render_template("opcoes.html", usuario=current_user.nome)
+
+
+@app.route("/api/carteira/<int:cid>/opcoes/vencendo-count")
+@login_required
+def api_opcoes_vencendo_count(cid):
+    """Quantas operações em aberto vencem nos próximos 7 dias — usado pro badge no menu
+    'Opções', visível mesmo fora da aba (sem precisar entrar lá toda semana pra lembrar)."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    limite = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    n = OpcaoOp.query.filter_by(carteira_id=cid, status="aberta") \
+        .filter(OpcaoOp.data_vencimento >= hoje, OpcaoOp.data_vencimento <= limite).count()
+    return jsonify({"count": n})
 
 
 @app.route("/api/carteira/<int:cid>/opcoes")

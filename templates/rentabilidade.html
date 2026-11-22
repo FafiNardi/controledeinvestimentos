@@ -326,6 +326,7 @@
       <label><input type="checkbox" id="chkCDI" onchange="toggleIndice()"> CDI</label>
       <label><input type="checkbox" id="chkIBOV" onchange="toggleIndice()"> Ibovespa</label>
       <label><input type="checkbox" id="chkIFIX" onchange="toggleIndice()"> IFIX</label>
+      <span id="indicesAviso" class="muted" style="font-size:11px;display:none"></span>
     </div>
     <div class="chart-wrap"><canvas id="chAcumJanela"></canvas></div>
   </div>
@@ -1006,15 +1007,33 @@ async function toggleIndice(){
   renderCharts();
 }
 let _indicesCarregados = false;
+let _indicesCarregando = null; // guarda a Promise em andamento, pra não disparar 2 fetches se os checkboxes forem clicados em sequência rápida
 async function carregarIndices(){
   // CDI/Ibovespa/IFIX são compartilhados entre todo mundo (não mudam por carteira) — busca
   // uma vez só por carregamento de página, não a cada troca de carteira/renderização
   if(_indicesCarregados) return;
-  try{
-    const r = await fetch('/api/indices-mensais');
-    if(r.ok) INDICES = await r.json();
-  } catch(e){ /* checkboxes de índice só ficam sem dado — resto da tela funciona normal */ }
-  _indicesCarregados = true;
+  if(_indicesCarregando) return _indicesCarregando;
+  _indicesCarregando = (async()=>{
+    try{
+      const r = await fetch('/api/indices-mensais');
+      if(r.ok){
+        INDICES = await r.json();
+        // só marca "carregado" quando realmente deu certo — senão uma falha de rede
+        // desabilitava os índices pro resto da sessão (só um F5 resolvia), já que
+        // marcar/desmarcar os checkboxes nunca mais tentava buscar de novo
+        _indicesCarregados = true;
+        const aviso = document.getElementById('indicesAviso');
+        if(INDICES.erro){
+          aviso.textContent = '⚠️ '+INDICES.erro;
+          aviso.style.display = '';
+        } else {
+          aviso.style.display = 'none';
+        }
+      }
+    } catch(e){ /* não marca _indicesCarregados — próxima tentativa (outro checkbox, outro load) tenta de novo */ }
+    _indicesCarregando = null;
+  })();
+  return _indicesCarregando;
 }
 
 async function load(){
@@ -1351,11 +1370,23 @@ function renderCharts(){
   function serieIndice(indice){
     // devolve PONTOS PERCENTUAIS acumulados (0 = início), mesma escala do dataset da
     // carteira (DATA.meses[k].acumulado*100) — não um índice base-100, senão as duas
-    // linhas ficariam em escalas diferentes no mesmo eixo Y
+    // linhas ficariam em escalas diferentes no mesmo eixo Y.
+    // Nem todo índice cobre o início da janela (ex.: IFIX só tem dado real a partir de
+    // dez/2020 — ver fetch_ifix_mensal_fator). Tratar "sem dado" como fator 1 faria a linha
+    // aparecer "achatada em 0%" nesses meses, como se o índice realmente não tivesse
+    // variado — enganoso, parece dado real. Em vez disso: null (Chart.js abre um buraco,
+    // não desenha nada) até o primeiro mês em que o índice realmente tem fator, e a
+    // comparação começa (em 0%) a partir dali, não do início da janela.
     const fatores = INDICES[indice] || {};
-    let fatorAcum = 1;
-    return keysJanela.map((k,i)=>{
-      if(i>0) fatorAcum *= (fatores[k] != null ? fatores[k] : 1); // sem dado nesse mês = linha fica "parada" ali
+    let fatorAcum = 1, comecou = false;
+    return keysJanela.map(k=>{
+      const temFator = Object.prototype.hasOwnProperty.call(fatores, k);
+      if(!comecou){
+        if(!temFator) return null;
+        comecou = true;
+        return 0;
+      }
+      fatorAcum *= (temFator ? fatores[k] : 1);
       return (fatorAcum - 1) * 100;
     });
   }

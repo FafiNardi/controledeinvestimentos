@@ -53,6 +53,8 @@
   .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
             font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
             display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .nav-badge{display:inline-block;margin-left:5px;background:var(--red);color:#fff;border-radius:999px;
+             padding:1px 6px;font-size:10px;font-weight:800;line-height:1.4;vertical-align:1px}
   .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
   .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
   .topbar-spacer{flex:1;min-width:4px}
@@ -130,7 +132,7 @@
     <div class="brand"><span class="mark"></span>Rebalanceamento</div>
     <nav class="tabs-nav">
       <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
-      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções<span id="badgeOpcoesVencendo" class="nav-badge" style="display:none"></span></button>
       <button class="tab-link on">📊 Rebalanceamento</button>
       <button class="tab-link" onclick="location.href='/preco-teto'">🏷️ Preço Teto</button>
       <button class="tab-link" onclick="location.href='/numero-magico'">🔢 Número Mágico</button>
@@ -282,6 +284,19 @@ let CID = null;            // carteira selecionada
 let EDIT = false;          // posso editar a carteira atual?
 let SORT = {field:null, dir:1};
 
+async function atualizarBadgeOpcoes(){
+  // best-effort: se falhar, o badge simplesmente não aparece — não pode atrapalhar o resto da tela
+  if(!CID) return;
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/opcoes/vencendo-count');
+    if(!r.ok) return;
+    const d = await r.json();
+    const b = document.getElementById('badgeOpcoesVencendo');
+    if(!b) return;
+    if(d.count>0){ b.textContent = d.count; b.style.display = ''; }
+    else b.style.display = 'none';
+  } catch(e){ /* sem badge, sem drama */ }
+}
 async function carregarCarteiras(){
   const r = await fetch('/api/carteiras'); const d = await r.json();
   CARTEIRAS = d.carteiras;
@@ -321,6 +336,7 @@ async function novaCarteira(){
 }
 
 async function load(){
+  atualizarBadgeOpcoes(); // sem await — é só um badge, não pode atrasar o carregamento do resto
   if(!CID){ renderTudo(); return; }
   // Antes, uma falha aqui (rede, 5xx, sessão expirada) só dava "return" calado — a tela
   // ficava com os dados antigos e NENHUM aviso, dando a impressão de que a ação que acabou

@@ -154,6 +154,8 @@ class PrecoTetoPremissa(db.Model):
     asset_id = db.Column(db.Integer, db.ForeignKey("asset.id"), nullable=False)
     metodo = db.Column(db.String(20), nullable=False)  # bazin, barsi, ...
     dados_json = db.Column(db.Text, default="{}")
+    atualizado_em = db.Column(db.DateTime)  # quando as premissas foram salvas pela última vez;
+    # None em registros salvos antes desse campo existir — sem data, sem aviso de "desatualizado"
     __table_args__ = (db.UniqueConstraint("asset_id", "metodo"),)
 
 
@@ -2522,17 +2524,32 @@ def api_yield_on_cost(cid):
             investido = (asset.num_acoes or 0) * (asset.preco_medio or 0)
         else:
             investido = _valor_investido_por_aportes(ra.movs)
+        # DY de mercado = o dividend yield atual do ativo (cotação de hoje), já calculado e
+        # cacheado pelo Rebalanceamento — só existe enquanto o ativo ainda está lá cadastrado
+        # e com cotação buscada; serve de referência pra comparar com o yield-on-cost (que é
+        # sobre o preço pago, não o de mercado), então fica None pra ativo já vendido/sem
+        # cotação, sem tentar estimar nada.
+        dy_mercado = asset.dy if (asset and asset.dy) else None
         linhas.append({
             "nome": ra.nome, "classe": ra.classe or "", "investido": investido,
             "total": total, "m24": m24, "m12": m12, "ano": ano,
             "yield_total": pct(total, investido), "yield_24m": pct(m24, investido),
             "yield_12m": pct(m12, investido), "yield_ano": pct(ano, investido),
+            "dy_mercado": dy_mercado,
         })
         tot["investido"] += investido
         tot["total"] += total
         tot["m24"] += m24
         tot["m12"] += m12
         tot["ano"] += ano
+
+    # DY de mercado médio da carteira, ponderado pelo valor investido de cada ativo — só entra
+    # na ponderação quem tem os dois números (investido > 0 e dy de mercado conhecido), senão um
+    # ativo sem cotação puxaria a média pra baixo sem motivo
+    base_dy = sum(l["investido"] for l in linhas if l["dy_mercado"] is not None and l["investido"] > 0)
+    dy_mercado_medio = (sum(l["investido"] * l["dy_mercado"] for l in linhas
+                            if l["dy_mercado"] is not None and l["investido"] > 0) / base_dy) \
+        if base_dy else None
 
     return jsonify({
         "linhas": linhas,
@@ -2542,6 +2559,7 @@ def api_yield_on_cost(cid):
             "yield_24m": pct(tot["m24"], tot["investido"]),
             "yield_12m": pct(tot["m12"], tot["investido"]),
             "yield_ano": pct(tot["ano"], tot["investido"]),
+            "dy_mercado": dy_mercado_medio,
         },
         "ano_atual": ano_atual,
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
@@ -2656,15 +2674,19 @@ def api_preco_teto(cid):
     premissas = PrecoTetoPremissa.query.filter(PrecoTetoPremissa.asset_id.in_(asset_ids)).all() \
         if asset_ids else []
     por_asset = {}
+    atualizado_por_asset = {}
     for p in premissas:
         try:
             dados = json.loads(p.dados_json or "{}")
         except (TypeError, ValueError):
             dados = {}
         por_asset.setdefault(p.asset_id, {})[p.metodo] = dados
+        if p.atualizado_em:
+            atualizado_por_asset.setdefault(p.asset_id, {})[p.metodo] = p.atualizado_em.isoformat()
     ativos_out = [{
         "id": a.id, "ticker": a.ticker, "classe": a.classe or "", "segmento": a.segmento or "",
         "preco": a.preco or 0, "num_acoes": a.num_acoes or 0, "premissas": por_asset.get(a.id, {}),
+        "premissas_atualizado_em": atualizado_por_asset.get(a.id, {}),
         "oculto": bool(a.oculto_preco_teto),
     } for a in assets]
     return jsonify({
@@ -2706,8 +2728,9 @@ def api_preco_teto_salvar():
         premissa = PrecoTetoPremissa(asset_id=a.id, metodo=metodo)
         db.session.add(premissa)
     premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
+    premissa.atualizado_em = datetime.utcnow()
     db.session.commit()
-    return jsonify({"ok": True, "id": premissa.id})
+    return jsonify({"ok": True, "id": premissa.id, "atualizado_em": premissa.atualizado_em.isoformat()})
 
 
 @app.route("/api/investidor10/<ticker>")
@@ -2778,6 +2801,7 @@ def ensure_schema():
     add("opcao_op", "preco_medio", "preco_medio FLOAT DEFAULT 0")
     add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
     add("opcao_op", "operacao", "operacao VARCHAR(6) DEFAULT 'venda'")
+    add("preco_teto_premissa", "atualizado_em", "atualizado_em TIMESTAMP")
     cols = colunas_de("rent_ativo")
     if cols is not None:
         if "classe" in cols and "is_caixa" in cols:

@@ -155,6 +155,7 @@
           <th class="sortable" data-sort="yield_24m"><span class="th-label">Yield 24m</span></th>
           <th class="sortable" data-sort="yield_12m"><span class="th-label">Yield 12m</span></th>
           <th class="sortable" data-sort="yield_ano"><span class="th-label">Yield Ano</span></th>
+          <th class="sortable" data-sort="dy_mercado"><span class="th-label">DY Mercado</span></th>
         </tr></thead>
         <tbody id="tbodyYoC"></tbody>
         <tfoot id="tfootYoC"></tfoot>
@@ -253,6 +254,8 @@ function renderStats(){
       <div class="sub">${BRL(t.m12)} nos últimos 12 meses</div></div>
     <div class="stat"><div class="k">Yield ${anoAtual}</div><div class="v ${(t.yield_ano||0)>0?'pos':''}">${PCT(t.yield_ano)}</div>
       <div class="sub">${BRL(t.ano)} no ano vigente</div></div>
+    <div class="stat"><div class="k">DY de Mercado (hoje)</div><div class="v">${PCT(t.dy_mercado)}</div>
+      <div class="sub">média ponderada pelo valor investido — compare com o Yield 12 meses acima</div></div>
   `;
 }
 
@@ -290,7 +293,7 @@ function renderTabela(){
   document.getElementById('filtroInfo').textContent = `${linhas.length} de ${(DATA.linhas||[]).length} ativos`;
   const tb = document.getElementById('tbodyYoC');
   if(!linhas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="11">Nenhum provento lançado ainda — lance os proventos mensais na aba Rentabilidade pra esse relatório ganhar vida.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhum provento lançado ainda — lance os proventos mensais na aba Rentabilidade pra esse relatório ganhar vida.</td></tr>`;
     document.getElementById('tfootYoC').innerHTML = '';
     return;
   }
@@ -306,6 +309,7 @@ function renderTabela(){
       <td class="${(l.yield_24m||0)>0?'pos':''}">${PCT(l.yield_24m)}</td>
       <td class="${(l.yield_12m||0)>0?'pos':''}">${PCT(l.yield_12m)}</td>
       <td class="${(l.yield_ano||0)>0?'pos':''}">${PCT(l.yield_ano)}</td>
+      <td>${l.dy_mercado==null?'—':PCT(l.dy_mercado)}</td>
     </tr>`).join('');
   const t = DATA.totais || {};
   document.getElementById('tfootYoC').innerHTML = `<tr>
@@ -319,6 +323,7 @@ function renderTabela(){
       <td>${PCT(t.yield_24m)}</td>
       <td>${PCT(t.yield_12m)}</td>
       <td>${PCT(t.yield_ano)}</td>
+      <td>${t.dy_mercado==null?'—':PCT(t.dy_mercado)}</td>
     </tr>`;
 }
 

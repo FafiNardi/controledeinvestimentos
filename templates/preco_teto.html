@@ -429,6 +429,32 @@ function botaoBuscarMacro(a){
   </p>`;
 }
 
+// idade das premissas: meses desde a última vez que o método foi salvo. Sem data registrada
+// (premissa salva antes desse recurso existir) -> null, e aí não tem base pra avisar nada.
+function mesesDesde(iso){
+  if(!iso) return null;
+  const d = new Date(iso);
+  const agora = new Date();
+  let m = (agora.getFullYear()-d.getFullYear())*12 + (agora.getMonth()-d.getMonth());
+  if(agora.getDate() < d.getDate()) m -= 1;
+  return Math.max(0, m);
+}
+// pega, entre os métodos que de fato geraram um teto (preencheram o suficiente pra calcular
+// algo), o mais antigo — é esse que importa pro aviso, porque é o que está "carregando" o
+// número que o usuário vê na lista
+function idadePiorMetodo(a, tetos){
+  const metaa = a.premissas_atualizado_em || {};
+  let pior = null;
+  for(const m of Object.keys(tetos)){
+    if(tetos[m]==null) continue;
+    const meses = mesesDesde(metaa[m]);
+    if(meses==null) continue;
+    if(pior==null || meses > pior.meses) pior = {metodo:m, meses};
+  }
+  return pior;
+}
+const LIMITE_MESES_AVISO = 6;
+
 function tetosDoAtivo(a){
   return {
     bazin: tetoBazin(a.premissas.bazin||{}, a.classe),
@@ -466,7 +492,8 @@ function renderResumo(){
     const tetos = Object.values(t).filter(v=>v!=null);
     const melhor = tetos.length ? Math.min(...tetos) : null;
     const dist = distancia(melhor, a.preco);
-    return {...a, _tetos:t, _melhor:melhor, _dist:dist};
+    const idade = idadePiorMetodo(a, t);
+    return {...a, _tetos:t, _melhor:melhor, _dist:dist, _idade:idade};
   });
 
   const CAMPOS_TEXTO = new Set(['ticker','classe']);
@@ -499,8 +526,11 @@ function renderResumo(){
   }
   tb.innerHTML = enriquecidos.map(a=>{
     const t = a._tetos, melhor = a._melhor, dist = a._dist;
+    const avisoIdade = a._idade && a._idade.meses>=LIMITE_MESES_AVISO
+      ? ` <span style="cursor:help" title="Premissa de ${METODOS_INFO[a._idade.metodo].nome} de há ${a._idade.meses} meses — considere atualizar">⏱️</span>`
+      : '';
     return `<tr class="${ATIVO_EDITANDO===a.id?'linha-editando':''}">
-      <td class="ativo-cell">${a.ticker}</td>
+      <td class="ativo-cell">${a.ticker}${avisoIdade}</td>
       <td class="muted">${a.classe||'—'}</td>
       <td>${BRL(a.preco)}</td>
       <td class="grp-bazin">${t.bazin==null?'—':BRL(t.bazin)}</td>
@@ -673,6 +703,14 @@ function renderEditor(){
       <div class="view-tabs" style="margin-top:0">${pillsMetodo}</div>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 10px"><b style="color:var(--${info.cor})">${info.nome}</b> — ${info.desc}</p>
+    ${(()=>{
+      const meses = mesesDesde((a.premissas_atualizado_em||{})[METODO_EDITANDO]);
+      if(meses==null) return '';
+      const velha = meses>=LIMITE_MESES_AVISO;
+      const txt = meses===0 ? 'atualizadas este mês' : `atualizadas há ${meses} ${meses>1?'meses':'mês'}`;
+      return `<p style="font-size:11.5px;margin:-6px 0 10px;color:var(--${velha?'red':'muted'})">
+        ${velha?'⏱️ ':''}Premissas ${txt}${velha?' — considere revisar os números':''}</p>`;
+    })()}
     ${METODO_EDITANDO==='fluxo_descontado' ? botaoBuscarMacro(a) : ''}
     <div class="editor-fields">${camposPorMetodo[METODO_EDITANDO]()}</div>
     <div class="editor-resultado">
@@ -836,8 +874,15 @@ async function salvarPremissa(assetId, metodo, campo, valor){
   if(!a) return;
   a.premissas[metodo] = a.premissas[metodo] || {};
   a.premissas[metodo][campo] = num;
-  await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({asset_id:assetId, metodo, dados:a.premissas[metodo]})});
+  try{
+    const r = await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({asset_id:assetId, metodo, dados:a.premissas[metodo]})});
+    if(r.ok){
+      const d = await r.json();
+      a.premissas_atualizado_em = a.premissas_atualizado_em || {};
+      a.premissas_atualizado_em[metodo] = d.atualizado_em;
+    }
+  } catch(e){ /* falha de rede — o valor digitado fica na tela, mas a data de "atualizado em" só muda se o servidor confirmar */ }
   // atualiza a lista e o próprio editor na hora, sem recarregar a página nem perder a posição
   renderResumo(); renderEditor();
 }

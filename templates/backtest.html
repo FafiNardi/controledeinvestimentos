@@ -228,6 +228,7 @@
       <div class="chart-wrap"><canvas id="chBackTest"></canvas></div>
       <ul class="avisos" id="avisosJanela"></ul>
       <div id="divPorAtivo"></div>
+      <div id="metricasRisco"></div>
     </div>
   </div>
 </div>
@@ -551,6 +552,29 @@ function selecionarJanela(anos){
 
   document.getElementById('avisosJanela').innerHTML =
     (j.avisos||[]).map(a=>`<li>⚠️ ${a}</li>`).join('');
+
+  // métricas de risco — volatilidade (desvio-padrão dos retornos mensais, anualizado) e
+  // máximo drawdown (maior queda do pico até o vale) da carteira vs. Ibovespa; CDI fica de
+  // fora porque sua vol/drawdown são sempre ~0 e não acrescentam nada à comparação
+  const mr = c.metricas_risco;
+  if(mr){
+    const linhaRisco = (lbl, m, destaque) => `
+      <div class="resumo-tile ${destaque?'carteira':''}">
+        <div class="lbl">${lbl}</div>
+        <div class="val neg">${m.max_drawdown_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px">máx. drawdown</div>
+        <div class="muted" style="font-size:11.5px;margin-top:6px">Vol. anualizada: ${m.volatilidade_anual_pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})}%</div>
+      </div>`;
+    document.getElementById('metricasRisco').innerHTML = `
+      <div class="group-label" style="padding-top:20px">Métricas de risco</div>
+      <div class="resumo-grid">
+        ${linhaRisco('Carteira', mr.carteira, true)}
+        ${linhaRisco('Ibovespa', mr.ibov)}
+      </div>
+      <p class="hint" style="margin-top:8px">Volatilidade = desvio-padrão dos retornos mensais, anualizado (×√12). Drawdown = maior queda acumulada do pico até o vale seguinte, no período da janela.</p>`;
+  } else {
+    document.getElementById('metricasRisco').innerHTML = '';
+  }
 
   const labels = c.pontos.map(p=>{
     const [ano,mes] = p.mes.split('-');

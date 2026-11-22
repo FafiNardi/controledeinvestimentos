@@ -250,6 +250,10 @@
     </div>
     <span id="roBadge"></span>
     <div class="topbar-spacer"></div>
+    <button class="ghost" onclick="baixarRelatorioRentabilidade()"
+      title="Baixa um PDF com a evolução mensal (patrimônio, aportes, resgates, dividendos, retorno) e a composição atual da carteira">
+      📄 Baixar relatório (PDF)
+    </button>
     <button class="ghost" onclick="novaCarteira()">+ Nova carteira</button>
     <button class="ghost" id="btnDelCart" style="display:none;color:var(--red);border-color:var(--red)" onclick="deletarCarteira()">🗑 Excluir carteira</button>
   </div>
@@ -991,6 +995,11 @@ async function atualizarBadgeOpcoes(){
     else b.style.display = 'none';
   } catch(e){ /* sem badge, sem drama */ }
 }
+function baixarRelatorioRentabilidade(){
+  if(!CID){ alert('Selecione uma carteira primeiro.'); return; }
+  window.location.href = `/api/carteira/${CID}/rent/relatorio.pdf`;
+}
+
 async function carregarCarteiras(){
   const r = await fetch('/api/carteiras'); const d = await r.json();
   const sel = document.getElementById('selCarteira');

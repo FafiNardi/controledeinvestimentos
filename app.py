@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import statistics
 import threading
 import time
 import uuid
@@ -832,6 +833,27 @@ def _serie_mensal_ativo(ticker: str) -> list:
     return serie
 
 
+def _calc_metricas_risco(valores: list) -> dict:
+    """Vol. mensal/anualizada (desvio-padrão dos retornos mensais) e máximo drawdown
+    (maior queda do pico até o vale seguinte) de uma série de valores (ex.: pontos do
+    índice 100=início). Usado pra Carteira, CDI e Ibovespa do BackTest."""
+    if len(valores) < 2:
+        return {"volatilidade_mensal_pct": 0.0, "volatilidade_anual_pct": 0.0, "max_drawdown_pct": 0.0}
+    retornos = [(valores[i] / valores[i - 1] - 1) for i in range(1, len(valores)) if valores[i - 1]]
+    vol_mensal = statistics.stdev(retornos) if len(retornos) >= 2 else 0.0
+    pico = valores[0]
+    max_dd = 0.0
+    for v in valores:
+        pico = max(pico, v)
+        if pico:
+            max_dd = min(max_dd, (v / pico - 1))
+    return {
+        "volatilidade_mensal_pct": round(vol_mensal * 100, 2),
+        "volatilidade_anual_pct": round(vol_mensal * (12 ** 0.5) * 100, 2),
+        "max_drawdown_pct": round(max_dd * 100, 2),
+    }
+
+
 def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fundo_di_peso, reinveste):
     """Roda os meses da janela pra UM cenário de dividendo (reinvestido ou em caixa) e
     devolve {"pontos", "retorno_pct", "dividendos_recebidos_pct"}. Separado de
@@ -879,6 +901,11 @@ def _simular_cenario(ativos_validos, meses_janela, series_por_mes, cdi, ibov, fu
                         "ibov": round(pontos[-1]["ibov"] - 100, 2)},
         "dividendos_recebidos_pct": round(dividendos_recebidos, 2),
         "dividendos_por_ativo_pct": {t: round(v, 2) for t, v in dividendos_por_ativo.items() if v > 0},
+        "metricas_risco": {
+            "carteira": _calc_metricas_risco([p["carteira"] for p in pontos]),
+            "cdi": _calc_metricas_risco([p["cdi"] for p in pontos]),
+            "ibov": _calc_metricas_risco([p["ibov"] for p in pontos]),
+        },
     }
 
 
@@ -2196,6 +2223,138 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
 
     doc.build(story)
     return buf.getvalue()
+
+
+def _fmt_moeda_pdf_sinal(v, sinal):
+    neg = v < 0
+    s = f"{abs(v):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return ("-" if neg else "") + sinal + " " + s
+
+
+def gerar_pdf_relatorio_rentabilidade(carteira, data):
+    """Relatório anual de rentabilidade: evolução mensal (patrimônio, aportes,
+    resgates, dividendos, retorno do mês e acumulado) + composição atual da carteira."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    moeda = carteira.moeda or "BRL"
+    sinal = "R$" if moeda == "BRL" else "US$"
+    fmt = lambda v: _fmt_moeda_pdf_sinal(v or 0, sinal)
+    fmt_pct = lambda v: (f"{v * 100:+.2f}%" if v is not None else "—")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+                             leftMargin=1.2 * cm, rightMargin=1.2 * cm)
+    styles = getSampleStyleSheet()
+    titulo = ParagraphStyle("titulo", parent=styles["Heading1"], fontSize=15, spaceAfter=2)
+    subtitulo = ParagraphStyle("subtitulo", parent=styles["Normal"], fontSize=9,
+                                textColor=colors.HexColor("#5b6b7c"), spaceAfter=10)
+    secao = ParagraphStyle("secao", parent=styles["Heading2"], fontSize=12, spaceBefore=16, spaceAfter=6)
+    nota = ParagraphStyle("nota", parent=styles["Normal"], fontSize=8,
+                           textColor=colors.HexColor("#5b6b7c"), spaceBefore=14, alignment=TA_LEFT)
+
+    story = [
+        Paragraph("Relatório de Rentabilidade", titulo),
+        Paragraph(f"Carteira: {carteira.nome} &nbsp;·&nbsp; Gerado em "
+                  f"{datetime.now().strftime('%d/%m/%Y às %H:%M')}", subtitulo),
+    ]
+
+    meses = data.get("meses") or {}
+    if not meses:
+        story.append(Paragraph("Nenhum lançamento registrado nessa carteira ainda.", styles["Normal"]))
+        doc.build(story)
+        return buf.getvalue()
+
+    estilo_tabela = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1b2532")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.3),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f4f7")]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d7dee6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ])
+
+    chaves_ordenadas = sorted(meses.keys())
+    chave_atual = next((k for k in reversed(chaves_ordenadas) if meses[k]["tem_dado"]), None)
+    mes_atual = meses.get(chave_atual) if chave_atual else None
+
+    total_aportes = sum(m["aportes"] for m in meses.values())
+    total_resgates = sum(m["resgates"] for m in meses.values())
+    total_dividendos = sum(m["dividendos"] for m in meses.values())
+
+    story.append(Paragraph("Resumo geral", secao))
+    dados_resumo = [["Patrimônio atual", "Retorno acumulado", "Total aportado",
+                     "Total resgatado", "Total em dividendos"]]
+    dados_resumo.append([
+        fmt(mes_atual["patrimonio"]) if mes_atual else "—",
+        fmt_pct(mes_atual["acumulado"]) if mes_atual else "—",
+        fmt(total_aportes), fmt(total_resgates), fmt(total_dividendos),
+    ])
+    t0 = Table(dados_resumo, colWidths=[3.6 * cm] * 5)
+    t0.setStyle(estilo_tabela)
+    story.append(t0)
+
+    for ano in data.get("anos") or []:
+        chaves_ano = [k for k in chaves_ordenadas if k.startswith(str(ano))]
+        if not chaves_ano:
+            continue
+        story.append(Paragraph(f"Ano-calendário {ano}", secao))
+        dados = [["Mês", "Patrimônio", "Aportes", "Resgates", "Dividendos",
+                  "Retorno mês", "Acumulado"]]
+        for k in chaves_ano:
+            m = meses[k]
+            dados.append([
+                _fmt_mes_pdf(k), fmt(m["patrimonio"]), fmt(m["aportes"]), fmt(m["resgates"]),
+                fmt(m["dividendos"]), fmt_pct(m["rent"]) if m["tem_dado"] else "—",
+                fmt_pct(m["acumulado"]) if m["tem_dado"] else "—",
+            ])
+        t = Table(dados, repeatRows=1,
+                   colWidths=[1.6 * cm, 2.6 * cm, 2.3 * cm, 2.3 * cm, 2.3 * cm, 2.2 * cm, 2.2 * cm])
+        t.setStyle(estilo_tabela)
+        story.append(t)
+        story.append(Spacer(1, 4))
+
+    if mes_atual:
+        linhas_atuais = [l for l in mes_atual["linhas"] if l["mostrar"]]
+        if linhas_atuais:
+            story.append(Paragraph(f"Composição atual ({_fmt_mes_pdf(chave_atual)})", secao))
+            dados = [["Ativo", "Saldo", "Peso", "Retorno no mês"]]
+            for l in sorted(linhas_atuais, key=lambda x: x["final"], reverse=True):
+                dados.append([
+                    l["nome"], fmt(l["final"]), f"{l['peso'] * 100:.1f}%",
+                    fmt_pct(l["rent"]),
+                ])
+            t3 = Table(dados, repeatRows=1, colWidths=[5 * cm, 3.5 * cm, 2.5 * cm, 3.5 * cm])
+            t3.setStyle(estilo_tabela)
+            story.append(t3)
+
+    story.append(Paragraph(
+        "Retorno do mês = (Valor final + Resgates + Proventos) / (Saldo base + Aportes) − 1. "
+        "O acumulado é a capitalização composta dos retornos mensais desde o primeiro lançamento "
+        "da carteira. Documento de apoio ao controle pessoal, não é documento fiscal oficial.",
+        nota))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@app.route("/api/carteira/<int:cid>/rent/relatorio.pdf")
+@login_required
+def api_rent_relatorio_pdf(cid):
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    data = rent_compute(cid)
+    pdf_bytes = gerar_pdf_relatorio_rentabilidade(c, data)
+    nome_arquivo = f"rentabilidade_{c.nome}_{datetime.now().strftime('%Y%m%d')}.pdf" \
+        .replace(" ", "_").replace("/", "-")
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
+                      as_attachment=True, download_name=nome_arquivo)
 
 
 @app.route("/api/carteira/<int:cid>/opcoes/relatorio.pdf")

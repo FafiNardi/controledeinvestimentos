@@ -833,7 +833,8 @@ function renderGrupoAbertas(tipo, idVazio, idBox, idTbody){
       <td>${pctStrike==null?'—':PCT(pctStrike)}</td>
       <td><span class="estrategia-txt" title="${estr.longa}">${estr.curta}</span></td>
       <td class="acoes-cell">
-        ${EDIT ? `<button class="mini ghost" onclick="abrirEncerrar(${o.id})">Encerrar</button>` : ''}
+        ${EDIT ? `<button class="mini ghost" onclick="abrirEncerrar(${o.id})">Encerrar</button>
+        <button class="mini ghost" title="Excluir — lançou errado? Apaga sem deixar nenhum rastro no histórico" onclick="excluirOp(${o.id})">🗑</button>` : ''}
       </td>
     </tr>`;
   }).join('');

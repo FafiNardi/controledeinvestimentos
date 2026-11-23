@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Imposto de Renda • Carteira</title>
+<script>if(localStorage.getItem('tema')==='light') document.documentElement.setAttribute('data-theme','light');</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#0a0f16; --panel:#131b25; --panel2:#1b2532; --line:#26313f;
+    --txt:#e9eef4; --muted:#8ca0b3; --accent:#2dd4bf; --blue:#5b8def;
+    --green:#34d399; --red:#f87171; --amber:#f5b754; --purple:#a78bfa;
+    --page-a:var(--amber); --page-b:var(--red); --tab-txt-on:#2b0a0a;
+  }
+  html[data-theme="light"]{
+    --bg:#f2f4f7; --panel:#ffffff; --panel2:#eaeef3; --line:#d7dee6;
+    --txt:#16202b; --muted:#5b6b7c; --accent:#0f9d8c; --blue:#3b66d1;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --purple:#7c3aed;
+    --tab-txt-on:#fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Manrope',-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);font-size:13.5px}
+  .stat .v,td,td input,td select{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+       font-variant-numeric:tabular-nums}
+  select,input,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+             border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit}
+  button{background:var(--blue);color:#fff;border:0;border-radius:7px;
+         padding:8px 14px;font-size:13px;cursor:pointer;font-weight:700;font-family:inherit}
+  button:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.mini{padding:4px 8px;font-size:11.5px;border-radius:6px}
+  .ro-badge{background:rgba(245,158,11,.15);color:var(--amber);padding:4px 10px;
+            border-radius:20px;font-size:11px;font-weight:700}
+  .topbar{background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar-row{display:flex;align-items:center;gap:10px;padding:11px 24px;flex-wrap:wrap}
+  .topbar-row.context{background:var(--panel2);border-top:1px solid var(--line);
+                       padding:10px 24px;row-gap:8px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--txt);
+         letter-spacing:-.01em;flex-shrink:0}
+  .brand .mark{width:22px;height:22px;border-radius:7px;flex-shrink:0;
+               background:linear-gradient(135deg,var(--page-a),var(--page-b))}
+  .tabs-nav{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);padding:3px;border-radius:10px;
+            border:1px solid var(--line)}
+  .tab-link{background:none;border:0;color:var(--muted);padding:7px 13px;border-radius:7px;
+            font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .nav-badge{display:inline-block;margin-left:5px;background:var(--red);color:#fff;border-radius:999px;
+             padding:1px 6px;font-size:10px;font-weight:800;line-height:1.4;vertical-align:1px}
+  .tab-link:hover:not(.on){background:var(--panel2);color:var(--txt)}
+  .tab-link.on{background:var(--page-a);color:var(--tab-txt-on);cursor:default}
+  .topbar-spacer{flex:1;min-width:4px}
+  .icon-btn{width:32px;height:32px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+            color:var(--txt);display:flex;align-items:center;justify-content:center;cursor:pointer;
+            font-size:14px;flex-shrink:0}
+  .icon-btn:hover{background:var(--bg)}
+  .user-chip{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;padding:6px 12px;
+             border-radius:20px;background:var(--panel2);border:1px solid var(--line);flex-shrink:0;
+             white-space:nowrap}
+  .user-chip a{color:var(--muted);text-decoration:none;font-weight:700}
+  .user-chip a:hover{color:var(--red)}
+  .ctx-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;font-weight:700;
+             flex-shrink:0}
+  .ctx-label select{max-width:240px}
+  .wrap{padding:0 24px 40px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .muted{color:var(--muted)}
+  .badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;
+         white-space:nowrap}
+  .badge.aberta{background:rgba(245,183,84,.16);color:var(--amber)}
+  .badge.po{background:rgba(52,211,153,.16);color:var(--green)}
+  .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
+               letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+               padding:26px 0 10px}
+  .group-label::after{content:"";flex:1;height:1px;background:var(--line)}
+  .ledger{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);
+          box-shadow:0 1px 2px rgba(0,0,0,.12);margin-top:10px}
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;font-size:10.2px;
+     text-transform:uppercase;letter-spacing:.04em}
+  td:first-child,th:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:0}
+  tr:hover td{background:var(--panel2)}
+  td input,td select{width:100%;min-width:78px;text-align:center;padding:5px;border-radius:6px;
+    font-size:12px;border:1px solid transparent;background:transparent;color:var(--txt)}
+  td input:hover,td select:hover{border-color:var(--line)}
+  td input:focus,td select:focus{border-color:var(--accent);background:var(--panel2);outline:0}
+  td.ativo-cell input{text-align:left;font-family:inherit;font-weight:700;min-width:90px}
+  .empty-row td{text-align:center;color:var(--muted);padding:20px}
+  .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 0 4px}
+  .acoes-cell{display:flex;gap:4px;justify-content:flex-end}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand"><span class="mark"></span>Imposto de Renda</div>
+    <nav class="tabs-nav">
+      <button class="tab-link" onclick="location.href='/rentabilidade'">📈 Rentabilidade</button>
+      <button class="tab-link" onclick="location.href='/opcoes'">🎯 Opções<span id="badgeOpcoesVencendo" class="nav-badge" style="display:none"></span></button>
+      <button class="tab-link" onclick="location.href='/'">📊 Rebalanceamento</button>
+      <button class="tab-link" onclick="location.href='/preco-teto'">🏷️ Preço Teto</button>
+      <button class="tab-link" onclick="location.href='/numero-magico'">🔢 Número Mágico</button>
+      <button class="tab-link" onclick="location.href='/yield-on-cost'">💰 Yield on Cost</button>
+      <button class="tab-link" onclick="location.href='/backtest'">🧪 BackTest</button>
+      <button class="tab-link on">🧾 Imposto de Renda</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro">🌙</button>
+    <div class="user-chip">👤 {{ usuario }} · <a href="/logout">sair</a></div>
+  </div>
+  <div class="topbar-row context">
+    <label class="ctx-label">Carteira
+      <select id="selCarteira" onchange="trocarCarteira()"></select>
+    </label>
+    <span id="roBadge"></span>
+  </div>
+</header>
+
+<div class="wrap">
+  <p class="muted" style="font-size:12px;margin:20px 0 0">
+    Apuração de IR e DARF de opções, ações e FII — separado da aba Opções pra não misturar
+    o controle de operações com o controle de imposto. Lance aqui as vendas de ações/FII no
+    mercado à vista (fora de opção); o que acontece com opções (prêmio, pó, exercício,
+    recompra) continua lançado na aba Opções e entra automaticamente na conta abaixo.
+  </p>
+
+  <div class="group-label">Vendas à vista (ações e FII, fora de opção)</div>
+  <p class="muted" style="font-size:12px;margin:0 0 12px">
+    Venda direta de uma ação ou cota de FII que você já tinha — não gerada por exercício de
+    opção (essas ficam automáticas, lançadas na aba Opções). <b>Ação</b> entra no mesmo
+    regime comum das opções e é a única que testa de verdade a isenção de R$20mil/mês;
+    <b>FII</b> tem apuração própria, sempre tributável a 20%, sem isenção nenhuma (nem de
+    R$20mil, nem de qualquer valor).
+  </p>
+  <div class="filtros" style="padding:0 0 12px">
+    <button class="ghost" onclick="novaVendaAtivo()">+ Nova venda</button>
+  </div>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Ativo</th><th>Classe</th><th>Data venda</th><th>Qtde</th>
+          <th>Valor venda</th><th>Custo total</th><th>Demais custos</th><th>Resultado</th><th>Obs.</th><th></th>
+        </tr></thead>
+        <tbody id="tbodyVendas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label">Imposto de Renda — Ações e Opções (estimativa)</div>
+  <p class="muted" style="font-size:12px;margin:0 0 12px">
+    15% sobre o resultado líquido mensal em operações comuns, 20% se abertura e fechamento
+    caírem no mesmo dia (day trade). Prejuízo de um mês abate o lucro dos meses seguintes,
+    dentro do mesmo regime. <b>DARF abaixo de R$10 não precisa ser paga</b> — o valor fica
+    acumulado e soma com o do(s) mês(es) seguinte(s) até bater R$10. Pago via DARF (código
+    6015), até o último dia útil do mês seguinte. <b>Quando uma CALL vendida é exercida</b>,
+    o prêmio não é renda de opção — ele é somado ao valor de venda da ação e entra, no
+    regime comum, na <b>mesma apuração mensal</b> das opções (uma perda abate a outra, o
+    mesmo mínimo de R$10 vale pra soma dos dois). Essa venda <b>nunca entra na isenção de
+    R$20.000/mês</b> — a isenção vale só pra venda "normal" no mercado à vista, não pra
+    ação entregue por exercício de opção (IN RFB 1.585/2015, art. 59 §2º, IV).
+    <b>PUT exercida não entra em nenhum cálculo</b>: o prêmio reduz o preço de compra da ação
+    adquirida, sem imposto devido agora — só quando essa ação for vendida no futuro.
+  </p>
+  <div class="filtros" style="padding:0 0 12px">
+    <button class="ghost" onclick="baixarRelatorioIR()"
+      title="Baixa um PDF com todas as operações e a apuração mensal de IR, organizado por ano — útil pra declarar e conferir o valor devido">
+      📄 Baixar relatório (PDF)
+    </button>
+    <label class="ctx-label" title="Prejuízo de renda variável (regime comum) que já existia ANTES do histórico lançado aqui — ex.: saldo que já constava na sua declaração de IR do ano anterior. Entra como ponto de partida da compensação do primeiro mês.">
+      Prejuízo inicial (regime comum)
+      <input id="inputPrejuizoInicial" type="text" inputmode="decimal" style="width:110px"
+        onfocus="this.select()" onchange="salvarPrejuizoInicial(this.value)">
+    </label>
+  </div>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Mês</th><th>Regime</th><th>Resultado opções</th>
+          <th title="Ganho tributável da venda de ações por exercício de CALL nesse mês — sempre tributável, não entra na isenção de R$20mil (vale só pra venda normal no mercado à vista)">Resultado ações (exercício)</th>
+          <th title="Venda de ação lançada em 'Vendas à vista', fora de opção — essa sim testa a isenção de R$20mil de verdade">Resultado ações (à vista)</th>
+          <th>Prejuízo compensado</th>
+          <th>Base de cálculo</th><th>Alíquota</th><th>IR calculado</th>
+          <th title="Valor que ainda não bateu R$10 — não precisa pagar agora, some com o próximo mês">Acumulado (&lt; R$10)</th>
+          <th>IR devido (DARF)</th><th>Pagamento</th>
+        </tr></thead>
+        <tbody id="tbodyIR"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label" style="margin-top:24px">Imposto de Renda — FII (regime separado)</div>
+  <p class="muted" style="font-size:12px;margin:0 0 12px">
+    FII é sempre tributado a <b>20%</b>, <b>nunca</b> tem a isenção de R$20mil (Lei
+    11.196/2005, art. 3º, XIII — vale pra qualquer valor vendido), e o prejuízo de FII
+    <b>só compensa prejuízo de FII</b>, nunca entra na conta de ações/opções acima.
+  </p>
+  <div class="filtros" style="padding:0 0 12px">
+    <label class="ctx-label" title="Prejuízo de FII que já existia ANTES do histórico lançado aqui — ex.: saldo que já constava na sua declaração de IR do ano anterior. Entra como ponto de partida da compensação do primeiro mês.">
+      Prejuízo inicial (FII)
+      <input id="inputPrejuizoInicialFii" type="text" inputmode="decimal" style="width:110px"
+        onfocus="this.select()" onchange="salvarPrejuizoInicialFii(this.value)">
+    </label>
+  </div>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Mês</th><th>Resultado do mês</th><th>Prejuízo compensado</th>
+          <th>Base de cálculo</th><th>IR calculado</th><th>IR devido (DARF)</th><th>Pagamento</th>
+        </tr></thead>
+        <tbody id="tbodyIRFii"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let CID = null, DATA = { operacoes: [], vendas: [], darfs: [], carteira: null }, EDIT = false, MOEDA = 'BRL';
+
+const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const PCT = v => v==null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+
+function baixarRelatorioIR(){
+  if(!CID){ alert('Selecione uma carteira primeiro.'); return; }
+  window.location.href = `/api/carteira/${CID}/opcoes/relatorio.pdf`;
+}
+
+function toggleTema(){
+  const claro = document.documentElement.getAttribute('data-theme')==='light';
+  if(claro){ document.documentElement.removeAttribute('data-theme'); localStorage.setItem('tema','dark'); }
+  else { document.documentElement.setAttribute('data-theme','light'); localStorage.setItem('tema','light'); }
+  document.getElementById('btnTema').textContent = claro ? '🌙' : '☀️';
+}
+if(localStorage.getItem('tema')==='light') document.getElementById('btnTema').textContent = '☀️';
+
+async function atualizarBadgeOpcoes(){
+  if(!CID) return;
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/opcoes/vencendo-count');
+    if(!r.ok) return;
+    const d = await r.json();
+    const b = document.getElementById('badgeOpcoesVencendo');
+    if(!b) return;
+    if(d.count>0){ b.textContent = d.count; b.style.display = ''; }
+    else b.style.display = 'none';
+  } catch(e){ /* sem badge, sem drama */ }
+}
+async function carregarCarteiras(){
+  const r = await fetch('/api/carteiras'); const d = await r.json();
+  const sel = document.getElementById('selCarteira');
+  if(!d.carteiras.length){ sel.innerHTML='<option>— crie uma carteira no Rebalanceamento —</option>'; return; }
+  sel.innerHTML = d.carteiras.map(c=>
+    `<option value="${c.id}">${c.nome}${c.minha?' (minha)':' · '+c.dono}</option>`).join('');
+  if(!CID || !d.carteiras.find(c=>c.id===CID)){
+    const salva = parseInt(localStorage.getItem('ultimaCarteiraId'));
+    const existeSalva = d.carteiras.find(c=>c.id===salva);
+    const minha = d.carteiras.find(c=>c.minha);
+    CID = existeSalva ? salva : (minha || d.carteiras[0]).id;
+  }
+  sel.value = CID;
+  localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+async function trocarCarteira(){
+  CID = parseInt(document.getElementById('selCarteira').value);
+  if(CID) localStorage.setItem('ultimaCarteiraId', CID);
+  await load();
+}
+
+async function load(){
+  atualizarBadgeOpcoes(); // sem await — é só um badge, não pode atrasar o carregamento do resto
+  const r = await fetch('/api/carteira/'+CID+'/opcoes');
+  DATA = await r.json();
+  EDIT = DATA.editavel;
+  MOEDA = (DATA.carteira && DATA.carteira.moeda) || 'BRL';
+  document.getElementById('roBadge').innerHTML = EDIT ? '' :
+    `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
+  const inputPJ = document.getElementById('inputPrejuizoInicial');
+  inputPJ.value = BRL(DATA.carteira.prejuizo_inicial_ir || 0);
+  inputPJ.disabled = !EDIT;
+  const inputPJFii = document.getElementById('inputPrejuizoInicialFii');
+  inputPJFii.value = BRL(DATA.carteira.prejuizo_inicial_fii || 0);
+  inputPJFii.disabled = !EDIT;
+  renderTudo();
+}
+
+async function salvarPrejuizoInicial(valor){
+  const num = Math.abs(parseMoeda(valor));
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/opcoes/prejuizo-inicial',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({valor:num})});
+    if(!r.ok){ alert('Não consegui salvar o prejuízo inicial.'); await load(); return; }
+    DATA.carteira.prejuizo_inicial_ir = num;
+    document.getElementById('inputPrejuizoInicial').value = BRL(num);
+    renderIR();
+  } catch(e){
+    alert('Falha de rede ao salvar o prejuízo inicial — recarregando.');
+    await load();
+  }
+}
+
+async function salvarPrejuizoInicialFii(valor){
+  const num = Math.abs(parseMoeda(valor));
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/opcoes/prejuizo-inicial-fii',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({valor:num})});
+    if(!r.ok){ alert('Não consegui salvar o prejuízo inicial de FII.'); await load(); return; }
+    DATA.carteira.prejuizo_inicial_fii = num;
+    document.getElementById('inputPrejuizoInicialFii').value = BRL(num);
+    renderIRFii();
+  } catch(e){
+    alert('Falha de rede ao salvar o prejuízo inicial de FII — recarregando.');
+    await load();
+  }
+}
+
+// ---------------------------------------------------------------- cálculos (opções)
+// Portados de opcoes.html — precisam ficar idênticos nas duas telas, senão a conta de IR
+// aqui diverge da que a aba Opções mostraria se ainda tivesse essa seção.
+
+function premioTotal(o){ return (o.operacao==='compra'?-1:1) * (o.premio||0) * (o.quantidade||0); }
+function custoTotal(o){ return (o.custo_recompra||0) * (o.quantidade||0); }
+function resultadoOp(o){
+  if(o.status==='aberta') return null;
+  return premioTotal(o) - (o.status==='recomprada' ? custoTotal(o) : 0);
+}
+function lucroVendaAcao(o){
+  if(o.tipo!=='CALL' || o.status!=='exercida' || !o.preco_medio) return null;
+  return (o.strike - o.preco_medio) * (o.quantidade||0);
+}
+function lucroTotalOperacao(o){
+  const lv = lucroVendaAcao(o);
+  if(lv==null) return null;
+  return lv + premioTotal(o) - (o.custo_exercicio||0);
+}
+function resultadoOpcaoParaIR(o){
+  if(o.status==='aberta' || o.status==='exercida') return null;
+  return resultadoOp(o);
+}
+
+function mesKey(d){ return (d||'').slice(0,7); } // YYYY-MM
+const NOMES_MES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto',
+  'Setembro','Outubro','Novembro','Dezembro'];
+function formatMes(mesKeyStr){
+  const [ano, mes] = (mesKeyStr||'').split('-');
+  const nome = NOMES_MES[parseInt(mes,10)-1];
+  return nome ? `${nome}/${ano}` : (mesKeyStr||'—');
+}
+function fmtData(d){
+  if(!d) return '—';
+  const [a,m,dd] = d.split('-');
+  return dd+'/'+m+'/'+a;
+}
+function parseMoeda(str){
+  if(str==null || str==='') return 0;
+  let s = String(str).replace(/[^\d,.-]/g,'');
+  if(s.includes(',')) s = s.replace(/\./g,'').replace(',', '.');
+  return parseFloat(s) || 0;
+}
+
+// Agrega, por mês, as vendas de ações geradas por exercício de CALL: total vendido (strike
+// × quantidade, só informativo) e o ganho (lucroTotalOperacao).
+//
+// venda de ação por EXERCÍCIO DE OPÇÃO nunca entra na isenção de R$20 mil/mês — essa
+// isenção vale só pra venda "normal" no mercado à vista. Por isso 'isento' é sempre false
+// aqui; o ganho (positivo OU negativo) sempre contribui pra base de cálculo.
+function calcularIRAcoesExercicio(){
+  const exercidasCall = (DATA.operacoes||[]).filter(o=>o.tipo==='CALL' && o.status==='exercida' && o.preco_medio);
+  const porMes = {};
+  exercidasCall.forEach(o=>{
+    const fech = o.data_fechamento || o.data_vencimento;
+    const mes = mesKey(fech);
+    if(!mes) return;
+    const bucket = porMes[mes] || (porMes[mes] = {vendas:0, ganho:0});
+    bucket.vendas += (o.strike||0) * (o.quantidade||0);
+    bucket.ganho += (lucroTotalOperacao(o)||0);
+  });
+  const linhas = [];
+  Object.keys(porMes).sort().forEach(mes=>{
+    const {vendas, ganho} = porMes[mes];
+    linhas.push({mes, vendas, ganho, isento:false});
+  });
+  return linhas;
+}
+
+// Vendas de AÇÃO no mercado à vista, lançadas direto (não via exercício de opção). É a
+// ÚNICA categoria que testa de verdade a isenção de R$20mil/mês.
+function calcularIRVendasAcoesVista(){
+  const porMes = {};
+  (DATA.vendas||[]).filter(v=>(v.classe||'acao')==='acao').forEach(v=>{
+    const mes = mesKey(v.data_venda);
+    if(!mes) return;
+    const bucket = porMes[mes] || (porMes[mes] = {vendas:0, ganho:0});
+    bucket.vendas += v.valor_venda||0;
+    bucket.ganho += (v.valor_venda||0) - (v.custo_total||0) - (v.demais_custos||0);
+  });
+  const LIMITE = 20000;
+  const linhas = [];
+  Object.keys(porMes).sort().forEach(mes=>{
+    const {vendas, ganho} = porMes[mes];
+    linhas.push({mes, vendas, ganho, isento: vendas<=LIMITE && ganho>0});
+  });
+  return linhas;
+}
+
+// Apuração de FII — regime TOTALMENTE separado de ações/opções: sempre tributável a 20%,
+// nunca tem a isenção de R$20mil, e o prejuízo de FII só compensa prejuízo de FII.
+function calcularIRFii(){
+  const porMes = {};
+  (DATA.vendas||[]).filter(v=>(v.classe||'acao')==='fii').forEach(v=>{
+    const mes = mesKey(v.data_venda);
+    if(!mes) return;
+    const resultado = (v.valor_venda||0) - (v.custo_total||0) - (v.demais_custos||0);
+    porMes[mes] = (porMes[mes]||0) + resultado;
+  });
+  const MINIMO_DARF = 10, aliquota = 0.20;
+  const linhas = [];
+  let prejuizo = (DATA.carteira && DATA.carteira.prejuizo_inicial_fii)
+    ? -Math.abs(DATA.carteira.prejuizo_inicial_fii) : 0;
+  let irPendente = 0;
+  Object.keys(porMes).sort().forEach(mes=>{
+    const resultadoMes = porMes[mes];
+    const base = resultadoMes + prejuizo;
+    const irCalculado = base>0 ? base*aliquota : 0;
+    const disponivel = irCalculado + irPendente;
+    const devido = disponivel >= MINIMO_DARF ? disponivel : 0;
+    linhas.push({mes, resultadoMes, prejuizoCompensado: prejuizo, base, aliquota,
+      irCalculado, irPendenteAnterior: irPendente, devido});
+    prejuizo = base>0 ? 0 : base;
+    irPendente = devido>0 ? 0 : disponivel;
+  });
+  return linhas;
+}
+
+// Apuração mensal de IR de renda variável (opções + venda de ações, por exercício de CALL
+// ou à vista normal), regime comum e day trade.
+function calcularIR(){
+  const fechadas = (DATA.operacoes||[]).filter(o=>o.status!=='aberta' && o.status!=='exercida');
+  const resultadoOpcoes = {comum:{}, day:{}};
+  fechadas.forEach(o=>{
+    const fech = o.data_fechamento || o.data_vencimento;
+    const mes = mesKey(fech);
+    if(!mes) return;
+    const regime = (o.data_abertura && o.data_abertura===fech) ? 'day' : 'comum';
+    resultadoOpcoes[regime][mes] = (resultadoOpcoes[regime][mes]||0) + (resultadoOpcaoParaIR(o)||0);
+  });
+  const exercicioPorMes = {};
+  calcularIRAcoesExercicio().forEach(l=>{ exercicioPorMes[l.mes] = l; });
+  const vistaPorMes = {};
+  calcularIRVendasAcoesVista().forEach(l=>{ vistaPorMes[l.mes] = l; });
+
+  const MINIMO_DARF = 10;
+  const linhas = [];
+  [['comum',0.15],['day',0.20]].forEach(([regime,aliquota])=>{
+    const meses = new Set(Object.keys(resultadoOpcoes[regime]));
+    if(regime==='comum'){
+      Object.keys(exercicioPorMes).forEach(m=>meses.add(m));
+      Object.keys(vistaPorMes).forEach(m=>meses.add(m));
+    }
+    let prejuizo = (regime==='comum' && DATA.carteira && DATA.carteira.prejuizo_inicial_ir)
+      ? -Math.abs(DATA.carteira.prejuizo_inicial_ir) : 0;
+    let irPendente = 0;
+    [...meses].sort().forEach(mes=>{
+      const resultadoOpcoesMes = resultadoOpcoes[regime][mes] || 0;
+      const ex = regime==='comum' ? exercicioPorMes[mes] : null;
+      const vi = regime==='comum' ? vistaPorMes[mes] : null;
+      const contribExercicio = ex ? ex.ganho : 0;
+      const contribVista = vi ? (vi.isento ? 0 : vi.ganho) : 0;
+      const resultadoMes = resultadoOpcoesMes + contribExercicio + contribVista;
+      const base = resultadoMes + prejuizo;
+      const irCalculado = base>0 ? base*aliquota : 0;
+      const disponivel = irCalculado + irPendente;
+      const devido = disponivel >= MINIMO_DARF ? disponivel : 0;
+      linhas.push({regime, mes, resultadoOpcoesMes,
+        vendasAcoesMes: ex ? ex.vendas : 0, ganhoAcoesMes: ex ? ex.ganho : 0,
+        isentoAcoes: ex ? ex.isento : null,
+        vendasVistaMes: vi ? vi.vendas : 0, ganhoVistaMes: vi ? vi.ganho : 0,
+        isentoVista: vi ? vi.isento : null,
+        resultadoMes, prejuizoCompensado: prejuizo, base, aliquota,
+        irCalculado, irPendenteAnterior: irPendente, devido});
+      prejuizo = base>0 ? 0 : base;
+      irPendente = devido>0 ? 0 : disponivel;
+    });
+  });
+  linhas.sort((a,b)=> a.mes.localeCompare(b.mes) || a.regime.localeCompare(b.regime));
+  return linhas;
+}
+
+// ---------------------------------------------------------------- render
+
+function renderTudo(){
+  renderVendas();
+  renderIR();
+  renderIRFii();
+}
+
+function statusDarfHtml(mes, regime, devido){
+  const pago = (DATA.darfs||[]).find(d=>d.mes===mes && d.regime===regime);
+  if(!(devido>0)) return '<span class="muted">—</span>';
+  if(pago){
+    return EDIT
+      ? `<button class="mini ghost" style="color:var(--green);border-color:var(--green)"
+           title="Pago em ${fmtData(pago.data_pagamento)} · clique pra desmarcar"
+           onclick="desmarcarDarf(${pago.id})">✓ Pago em ${fmtData(pago.data_pagamento)}</button>`
+      : `<span class="badge po">✓ Pago em ${fmtData(pago.data_pagamento)}</span>`;
+  }
+  return EDIT
+    ? `<button class="mini ghost" onclick="marcarDarf('${mes}','${regime}',${devido})">Marcar como paga</button>`
+    : `<span class="badge aberta">Pendente</span>`;
+}
+
+function renderIR(){
+  const linhas = calcularIR();
+  const tb = document.getElementById('tbodyIR');
+  if(!linhas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhuma operação encerrada ainda.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = linhas.map(l=>{
+    let colAcoes = '<span class="muted">—</span>';
+    if(l.isentoAcoes!=null){
+      colAcoes = `<span class="${l.ganhoAcoesMes>=0?'pos':'neg'}">${BRL(l.ganhoAcoesMes)}</span>`;
+    }
+    let colVista = '<span class="muted">—</span>';
+    if(l.isentoVista!=null){
+      colVista = `<span class="${l.ganhoVistaMes>=0?'pos':'neg'}">${BRL(l.ganhoVistaMes)}</span>` +
+        (l.isentoVista ? ' <span class="badge po" title="Vendas no mês: '+BRL(l.vendasVistaMes)+' (≤ R$20mil)">Isento</span>' : '');
+    }
+    return `<tr>
+      <td>${formatMes(l.mes)}</td>
+      <td>${l.regime==='day' ? 'Day trade' : 'Comum'}</td>
+      <td class="${l.resultadoOpcoesMes>=0?'pos':'neg'}">${BRL(l.resultadoOpcoesMes)}</td>
+      <td>${colAcoes}</td>
+      <td>${colVista}</td>
+      <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
+      <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
+      <td>${(l.aliquota*100).toFixed(0)}%</td>
+      <td>${BRL(l.irCalculado)}</td>
+      <td class="muted">${(l.devido===0 && (l.irCalculado>0 || l.irPendenteAnterior>0)) ? 'aguardando: '+BRL(l.irCalculado+l.irPendenteAnterior) : '—'}</td>
+      <td><b>${BRL(l.devido)}</b></td>
+      <td>${statusDarfHtml(l.mes, l.regime, l.devido)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderIRFii(){
+  const linhas = calcularIRFii();
+  const tb = document.getElementById('tbodyIRFii');
+  if(!tb) return;
+  if(!linhas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="7">Nenhuma venda de FII lançada ainda.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = linhas.map(l=>`<tr>
+      <td>${formatMes(l.mes)}</td>
+      <td class="${l.resultadoMes>=0?'pos':'neg'}">${BRL(l.resultadoMes)}</td>
+      <td class="muted">${l.prejuizoCompensado ? BRL(l.prejuizoCompensado) : '—'}</td>
+      <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
+      <td>${BRL(l.irCalculado)}</td>
+      <td><b>${BRL(l.devido)}</b></td>
+      <td>${statusDarfHtml(l.mes, 'fii', l.devido)}</td>
+    </tr>`).join('');
+}
+
+async function marcarDarf(mes, regime, valor){
+  const hoje = new Date().toISOString().slice(0,10);
+  const data = prompt('Data em que você pagou essa DARF (AAAA-MM-DD):', hoje);
+  if(data===null) return;
+  await fetch(`/api/carteira/${CID}/darfs`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mes, regime, data_pagamento:data, valor_pago:valor})});
+  await load();
+}
+async function desmarcarDarf(id){
+  if(!confirm('Desmarcar essa DARF como paga?')) return;
+  await fetch('/api/darfs/'+id, {method:'DELETE'});
+  await load();
+}
+
+// ------------------------------------------------- vendas à vista (ações/FII, fora de opção)
+
+function renderVendas(){
+  const vendas = DATA.vendas||[];
+  const tb = document.getElementById('tbodyVendas');
+  if(!vendas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma venda lançada ainda.</td></tr>`;
+    return;
+  }
+  const dis = EDIT ? '' : 'disabled';
+  tb.innerHTML = vendas.slice().sort((a,b)=>(b.data_venda||'').localeCompare(a.data_venda||'')).map(v=>{
+    const resultado = (v.valor_venda||0) - (v.custo_total||0) - (v.demais_custos||0);
+    return `<tr>
+      <td class="ativo-cell"><input value="${v.ticker}" ${dis} onchange="editarCampoVenda(${v.id},'ticker',this.value)"></td>
+      <td><select ${dis} onchange="editarCampoVenda(${v.id},'classe',this.value)">
+            <option value="acao" ${v.classe==='acao'?'selected':''}>Ação</option>
+            <option value="fii" ${v.classe==='fii'?'selected':''}>FII</option>
+          </select></td>
+      <td><input type="date" value="${v.data_venda||''}" ${dis} onchange="editarCampoVenda(${v.id},'data_venda',this.value)"></td>
+      <td><input type="number" step="1" value="${v.quantidade}" ${dis} onchange="editarCampoVenda(${v.id},'quantidade',this.value)"></td>
+      <td>${inputMoedaVenda(v.id,'valor_venda',v.valor_venda,dis)}</td>
+      <td>${inputMoedaVenda(v.id,'custo_total',v.custo_total,dis)}</td>
+      <td>${inputMoedaVenda(v.id,'demais_custos',v.demais_custos,dis)}</td>
+      <td class="${resultado>=0?'pos':'neg'}">${BRL(resultado)}</td>
+      <td class="ativo-cell"><input value="${(v.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampoVenda(${v.id},'obs',this.value)"></td>
+      <td class="acoes-cell">${EDIT ? `<button class="mini ghost" title="Excluir" onclick="excluirVenda(${v.id})">🗑</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+function inputMoedaVenda(id, campo, valor, dis){
+  return `<input type="text" inputmode="decimal" value="${BRL(valor)}" ${dis}
+    onfocus="this.select()" onchange="editarCampoVenda(${id},'${campo}',this.value)">`;
+}
+async function novaVendaAtivo(){
+  const hoje = new Date().toISOString().slice(0,10);
+  const r = await fetch('/api/carteira/'+CID+'/vendas-ativos',{method:'POST',headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ticker:'', classe:'acao', data_venda:hoje, quantidade:100, valor_venda:0, custo_total:0, demais_custos:0})});
+  const d = await r.json();
+  if(d.ok) await load();
+}
+const CAMPOS_MOEDA_VENDA = ['valor_venda','custo_total','demais_custos'];
+async function editarCampoVenda(id, campo, valor){
+  const valorNum = CAMPOS_MOEDA_VENDA.includes(campo) ? parseMoeda(valor)
+                  : campo==='quantidade' ? parseFloat(valor||0) : valor;
+  try{
+    const r = await fetch('/api/vendas-ativos/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({[campo]:valorNum})});
+    if(!r.ok){
+      const d = await r.json().catch(()=>({}));
+      alert('Não consegui salvar: ' + (d.erro || 'erro '+r.status) + '\n\nRecarregando a tabela com o valor que estava salvo.');
+      await load();
+      return;
+    }
+  } catch(e){
+    alert('Falha de rede ao salvar — recarregando a tabela com o valor que estava salvo.');
+    await load();
+    return;
+  }
+  const v = (DATA.vendas||[]).find(x=>x.id===id);
+  if(v){ v[campo] = valorNum; renderVendas(); renderIR(); renderIRFii(); }
+}
+async function excluirVenda(id){
+  if(!confirm('Excluir esta venda? Não pode ser desfeito.')) return;
+  await fetch('/api/vendas-ativos/'+id,{method:'DELETE'});
+  await load();
+}
+
+carregarCarteiras();
+</script>
+</body>
+</html>

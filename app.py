@@ -1851,6 +1851,12 @@ def opcoes():
     return render_template("opcoes.html", usuario=current_user.nome)
 
 
+@app.route("/imposto-renda")
+@login_required
+def imposto_renda():
+    return render_template("imposto_renda.html", usuario=current_user.nome)
+
+
 @app.route("/api/carteira/<int:cid>/opcoes/vencendo-count")
 @login_required
 def api_opcoes_vencendo_count(cid):

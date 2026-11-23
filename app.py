@@ -191,6 +191,10 @@ class RentMov(db.Model):
     aporte = db.Column(db.Float, default=0)
     resgate = db.Column(db.Float, default=0)
     proventos = db.Column(db.Float, default=0)
+    # remuneração líquida de empréstimo de ações (aluguel/BTC) recebida nesse ativo nesse
+    # mês — dinheiro de verdade, igual provento, mas separado pra dar pra ver "quanto essa
+    # ação rendeu de aluguel" isolado (entra no cálculo de retorno igual provento)
+    aluguel = db.Column(db.Float, default=0)
     # SEM default=0 de propósito: precisa dar pra distinguir "usuário lançou 0
     # porque a posição zerou de verdade" de "usuário ainda não fechou o mês e
     # não mexeu nesse campo". Com default=0, um mês com só aporte/proventos
@@ -1583,7 +1587,7 @@ def rent_compute(cid):
     for (y, mth) in serie:
         linhas = []
         tot = {"base": 0.0, "aporte": 0.0, "resgate": 0.0,
-               "proventos": 0.0, "final": 0.0}
+               "proventos": 0.0, "aluguel": 0.0, "final": 0.0}
         geracao_caixa = 0.0   # rendimento puro dos fundos caixa/DI no mês
         tem_dado = False
         for a in ativos:
@@ -1598,6 +1602,7 @@ def rent_compute(cid):
             aporte = (mv.aporte if mv else 0) or 0
             resgate = (mv.resgate if mv else 0) or 0
             prov = (mv.proventos if mv else 0) or 0
+            aluguel = (mv.aluguel if mv else 0) or 0
             final = (mv.valor_final if mv else None)
             if mv:
                 tem_dado = True
@@ -1613,7 +1618,7 @@ def rent_compute(cid):
             rent = None
             denom = base + aporte
             if denom:
-                rent = (final + resgate + prov) / denom - 1
+                rent = (final + resgate + prov + aluguel) / denom - 1
             # decide se o ativo aparece na lista deste mês:
             #  - aparece se teve lançamento, se ainda tem saldo, ou se nunca começou
             #  - some se foi encerrado (saldo 0, sem lançamento, mas já operou antes)
@@ -1623,13 +1628,14 @@ def rent_compute(cid):
                 mostrar = False
             linhas.append({"ativo_id": a.id, "nome": a.nome, "base": base,
                            "aporte": aporte, "resgate": resgate,
-                           "proventos": prov, "final": final, "rent": rent,
+                           "proventos": prov, "aluguel": aluguel, "final": final, "rent": rent,
                            "tem_mov": bool(mv), "mostrar": mostrar,
                            "final_estimado": estimado})
             if mv:
                 ja_comecou[a.id] = True
             tot["base"] += base; tot["aporte"] += aporte
             tot["resgate"] += resgate; tot["proventos"] += prov
+            tot["aluguel"] += aluguel
             tot["final"] += final
             # geração de caixa = rendimento do ativo (só p/ fundos caixa/DI) — "not estimado"
             # é necessário: num mês ainda não fechado, final=base (placeholder), então a conta
@@ -1642,7 +1648,7 @@ def rent_compute(cid):
         rent_cart = None
         denom = tot["base"] + tot["aporte"]
         if denom:
-            rent_cart = (tot["final"] + tot["resgate"] + tot["proventos"]) / denom - 1
+            rent_cart = (tot["final"] + tot["resgate"] + tot["proventos"] + tot["aluguel"]) / denom - 1
         if rent_cart is not None and tem_dado:
             acum *= (1 + rent_cart)
         for ln in linhas:
@@ -1651,8 +1657,9 @@ def rent_compute(cid):
             "ano": y, "mes": mth, "linhas": linhas,
             "patrimonio": tot["final"], "aportes": tot["aporte"],
             "resgates": tot["resgate"], "dividendos": tot["proventos"],
+            "aluguel": tot["aluguel"],
             "geracao_caixa": geracao_caixa if tem_dado else 0,
-            "geracao_total": (geracao_caixa + tot["proventos"]) if tem_dado else 0,
+            "geracao_total": (geracao_caixa + tot["proventos"] + tot["aluguel"]) if tem_dado else 0,
             "rent": rent_cart if tem_dado else None,
             "acumulado": (acum - 1) if tem_dado else None,
             "tem_dado": tem_dado,
@@ -1805,7 +1812,7 @@ def api_rent_ativo(aid):
     return jsonify({"ok": True})
 
 
-RENT_FIELDS = {"valor_base", "aporte", "resgate", "proventos", "valor_final"}
+RENT_FIELDS = {"valor_base", "aporte", "resgate", "proventos", "aluguel", "valor_final"}
 
 
 @app.route("/api/rent/mov", methods=["PUT"])
@@ -2563,16 +2570,17 @@ def gerar_pdf_relatorio_rentabilidade(carteira, data):
     total_aportes = sum(m["aportes"] for m in meses.values())
     total_resgates = sum(m["resgates"] for m in meses.values())
     total_dividendos = sum(m["dividendos"] for m in meses.values())
+    total_aluguel = sum(m.get("aluguel", 0) for m in meses.values())
 
     story.append(Paragraph("Resumo geral", secao))
     dados_resumo = [["Patrimônio atual", "Retorno acumulado", "Total aportado",
-                     "Total resgatado", "Total em dividendos"]]
+                     "Total resgatado", "Total em dividendos", "Total em aluguel"]]
     dados_resumo.append([
         fmt(mes_atual["patrimonio"]) if mes_atual else "—",
         fmt_pct(mes_atual["acumulado"]) if mes_atual else "—",
-        fmt(total_aportes), fmt(total_resgates), fmt(total_dividendos),
+        fmt(total_aportes), fmt(total_resgates), fmt(total_dividendos), fmt(total_aluguel),
     ])
-    t0 = Table(dados_resumo, colWidths=[3.6 * cm] * 5)
+    t0 = Table(dados_resumo, colWidths=[3 * cm] * 6)
     t0.setStyle(estilo_tabela)
     story.append(t0)
 
@@ -2581,17 +2589,18 @@ def gerar_pdf_relatorio_rentabilidade(carteira, data):
         if not chaves_ano:
             continue
         story.append(Paragraph(f"Ano-calendário {ano}", secao))
-        dados = [["Mês", "Patrimônio", "Aportes", "Resgates", "Dividendos",
+        dados = [["Mês", "Patrimônio", "Aportes", "Resgates", "Dividendos", "Aluguel",
                   "Retorno mês", "Acumulado"]]
         for k in chaves_ano:
             m = meses[k]
             dados.append([
                 _fmt_mes_pdf(k), fmt(m["patrimonio"]), fmt(m["aportes"]), fmt(m["resgates"]),
-                fmt(m["dividendos"]), fmt_pct(m["rent"]) if m["tem_dado"] else "—",
+                fmt(m["dividendos"]), fmt(m.get("aluguel", 0)),
+                fmt_pct(m["rent"]) if m["tem_dado"] else "—",
                 fmt_pct(m["acumulado"]) if m["tem_dado"] else "—",
             ])
         t = Table(dados, repeatRows=1,
-                   colWidths=[1.6 * cm, 2.6 * cm, 2.3 * cm, 2.3 * cm, 2.3 * cm, 2.2 * cm, 2.2 * cm])
+                   colWidths=[1.4 * cm, 2.3 * cm, 2 * cm, 2 * cm, 2 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm])
         t.setStyle(estilo_tabela)
         story.append(t)
         story.append(Spacer(1, 4))
@@ -3102,6 +3111,7 @@ def ensure_schema():
     add("preco_teto_premissa", "atualizado_em", "atualizado_em TIMESTAMP")
     add("carteira", "prejuizo_inicial_ir", "prejuizo_inicial_ir FLOAT DEFAULT 0")
     add("carteira", "prejuizo_inicial_fii", "prejuizo_inicial_fii FLOAT DEFAULT 0")
+    add("rent_mov", "aluguel", "aluguel FLOAT DEFAULT 0")
     cols = colunas_de("rent_ativo")
     if cols is not None:
         if "classe" in cols and "is_caixa" in cols:

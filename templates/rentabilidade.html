@@ -210,7 +210,7 @@
   .detalhe-box .stats{padding:0 0 16px}
   .detalhe-box .chartbox{padding:14px 14px 8px}
   .detalhe-box table{font-size:12px}
-  .hist-3col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .hist-3col{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px}
   .hist-3col table{width:100%}
   .hist-3col tbody{display:block;max-height:220px;overflow-y:auto}
   .hist-3col thead,.hist-3col tbody tr{display:table;width:100%;table-layout:fixed}
@@ -282,7 +282,9 @@
         <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('nome')" id="thAtivo">Ativo <span id="ordArrNome" style="color:var(--accent);font-size:10px"></span></th>
         <th style="cursor:pointer;user-select:none;text-align:center" onclick="toggleOrdem('classe')" id="thClasse">Classe <span id="ordArrClasse" style="color:var(--accent);font-size:10px"></span></th>
         <th style="text-align:center">Valor base</th><th style="text-align:center">Aporte (+)</th><th style="text-align:center">Resgate (−)</th>
-        <th style="text-align:center">Proventos</th><th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
+        <th style="text-align:center">Proventos</th>
+        <th style="text-align:center" title="Remuneração líquida de empréstimo de ações (aluguel/BTC) recebida nesse ativo nesse mês">Aluguel</th>
+        <th style="text-align:center">Valor final</th><th style="text-align:center">Rent. mês</th><th style="text-align:center">Peso</th><th></th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
@@ -471,6 +473,12 @@
         <h4 style="margin:0 0 6px;color:var(--txt);font-size:12.5px">💰 Proventos</h4>
         <table class="resumo-tab"><thead><tr><th style="text-align:left">Data</th><th>Valor</th></tr></thead>
           <tbody id="detProventosRows"></tbody>
+        </table>
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px;color:var(--txt);font-size:12.5px">🏦 Aluguel</h4>
+        <table class="resumo-tab"><thead><tr><th style="text-align:left">Data</th><th>Valor</th></tr></thead>
+          <tbody id="detAluguelRows"></tbody>
         </table>
       </div>
     </div>
@@ -873,7 +881,7 @@ function abrirDetalheAtivo(ativoId){
   // percorre todo o historico (todos os meses computados) coletando só os períodos
   // em que este ativo esteve ativo, na ordem cronológica
   const chaves = Object.keys(DATA.meses).sort();
-  let acum = 1, primeiraBase = null, totalAportes = 0, totalResgates = 0, totalDividendos = 0;
+  let acum = 1, primeiraBase = null, totalAportes = 0, totalResgates = 0, totalDividendos = 0, totalAluguel = 0;
   const historico = [];
   chaves.forEach(k=>{
     const mes = DATA.meses[k];
@@ -884,9 +892,10 @@ function abrirDetalheAtivo(ativoId){
     totalAportes += linha.aporte||0;
     totalResgates += linha.resgate||0;
     totalDividendos += linha.proventos||0;
+    totalAluguel += linha.aluguel||0;
     if(linha.rent!=null) acum *= (1+linha.rent);
     historico.push({periodo:k, base:linha.base, aporte:linha.aporte, resgate:linha.resgate,
-                     proventos:linha.proventos, final:linha.final, rent:linha.rent, acumulado:acum-1,
+                     proventos:linha.proventos, aluguel:linha.aluguel, final:linha.final, rent:linha.rent, acumulado:acum-1,
                      final_estimado:linha.final_estimado});
   });
   // "Total investido" é o dinheiro que ainda está no ativo (aportes menos resgates) — não a soma
@@ -918,6 +927,7 @@ function abrirDetalheAtivo(ativoId){
     <div class="stat"><div class="k">Total investido</div><div class="v">${BRL(totalInvestido)}</div></div>
     <div class="stat"><div class="k">Total em dividendos</div><div class="v">${BRL(totalDividendos)}</div></div>
     <div class="stat"><div class="k">% dividendo s/ investido</div><div class="v" style="color:var(--accent)">${pctDividendo.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</div></div>
+    <div class="stat" title="Remuneração líquida acumulada de empréstimo de ações (aluguel/BTC) nesse ativo"><div class="k">Total em aluguel</div><div class="v">${BRL(totalAluguel)}</div></div>
   `;
 
   DET_HISTORICO = historico;
@@ -950,6 +960,7 @@ function renderizarOperacoesAtivo(){
   mkTabela('detAportesRows', mkLista('aporte'), 'aporte');
   mkTabela('detResgatesRows', mkLista('resgate'), 'resgate');
   mkTabela('detProventosRows', mkLista('proventos'), 'proventos');
+  mkTabela('detAluguelRows', mkLista('aluguel'), 'aluguel');
 }
 
 function mudarJanelaDetalhe(v){
@@ -1151,7 +1162,7 @@ function renderMes(){
   const md = mesData(ANO,MES);
   const dis = EDIT ? '' : 'disabled';
   if(!DATA.ativos.length){
-    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:26px;color:var(--muted)">
+    tb.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:26px;color:var(--muted)">
       Nenhum ativo ainda — adicione o primeiro abaixo (ex.: Fundo DI, Ações, IPCA+...).</td></tr>`;
     return;
   }
@@ -1174,7 +1185,7 @@ function renderMes(){
     linhas = [...linhas].sort((a,b)=>chave(a).localeCompare(chave(b),'pt-BR')*ORD_DIR);
   }
   if(!linhas.length){
-    tb.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted)">
+    tb.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--muted)">
       Nenhum ativo ${FILTRO_CLASSE ? 'dessa classe' : 'ativo'} neste mês.</td></tr>`;
     return;
   }
@@ -1201,6 +1212,7 @@ function renderMes(){
       <td><input value="${l.aporte?BRL(l.aporte):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aporte',this.value)"></td>
       <td><input value="${l.resgate?BRL(l.resgate):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'resgate',this.value)"></td>
       <td><input value="${l.proventos?BRL(l.proventos):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'proventos',this.value)"></td>
+      <td><input value="${l.aluguel?BRL(l.aluguel):''}" placeholder="${moedaHint}" ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'aluguel',this.value)"></td>
       <td><input value="${l.tem_mov && !l.final_estimado?BRL(l.final):''}"
         placeholder="${moedaHint}"
         title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado. Enquanto não preencher, usamos o saldo anterior só por baixo dos panos pra calcular a rentabilidade — sem mostrar esse número aqui, já que numa renda variável ele pode ficar bem diferente do valor real.' : ''}"
@@ -1282,6 +1294,8 @@ function renderResumo(){
       ()=>''],
     ['Dividendos', i=>{const m=mesData(ANO,i);return m?BRL(m.dividendos):'—';},
       ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.dividendos:0);},0);return BRL(t);}],
+    ['Aluguel', i=>{const m=mesData(ANO,i);return m?BRL(m.aluguel):'—';},
+      ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?(m.aluguel||0):0);},0);return BRL(t);}],
     ['Geração de caixa', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?BRL(m.geracao_caixa):'—';},
       ()=>{const t=MESES.reduce((s,_,i)=>{const m=mesData(ANO,i+1);return s+(m?m.geracao_caixa:0);},0);return BRL(t);}],
     ['Ger. caixa + prov.', i=>{const m=mesData(ANO,i);return m&&m.tem_dado?BRL(m.geracao_total):'—';},
@@ -1594,7 +1608,7 @@ function atualizarColunasCalculadas(){
     const l = porAtivo[parseInt(tr.dataset.ativoId)];
     if(!l) return;
     const tds = tr.querySelectorAll('td');
-    const tdRent = tds[8], tdPeso = tds[9];
+    const tdRent = tds[9], tdPeso = tds[10];
     if(tdRent){ tdRent.className = classePct(l.rent); tdRent.textContent = PCT(l.rent); }
     if(tdPeso){ tdPeso.innerHTML = pesoBarHTML(l.peso); }
   });

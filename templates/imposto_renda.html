@@ -139,6 +139,13 @@
   </p>
   <div class="filtros" style="padding:0 0 12px">
     <button class="ghost" onclick="novaVendaAtivo()">+ Nova venda</button>
+    <label class="ctx-label">Ver:
+      <select id="filtroClasseVenda" onchange="renderVendas()">
+        <option value="">Todas</option>
+        <option value="acao">Só Ação</option>
+        <option value="fii">Só FII</option>
+      </select>
+    </label>
   </div>
   <div class="ledger">
     <div class="tbl-scroll">
@@ -148,6 +155,25 @@
           <th>Valor venda</th><th>Custo total</th><th>Demais custos</th><th>Resultado</th><th>Obs.</th><th></th>
         </tr></thead>
         <tbody id="tbodyVendas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="group-label">Vendas à vista de Ações — Teste da isenção de R$20mil/mês</div>
+  <p class="muted" style="font-size:12px;margin:0 0 12px">
+    Só pra conferir rápido se algum mês passou do limite de R$20mil em vendas de ações à
+    vista (o que tira a isenção daquele mês). Isso é <b>só o teste</b> — o imposto de
+    verdade (quando não isento) sai somado com opções/exercício na tabela "Ações e Opções"
+    logo abaixo, porque por lei entram na mesma apuração mensal.
+  </p>
+  <div class="ledger">
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>Mês</th><th>Vendas no mês</th><th>Resultado (ganho/prejuízo)</th>
+          <th title="Vendas do mês ≤ R$20mil E resultado positivo">Isento de R$20mil?</th>
+        </tr></thead>
+        <tbody id="tbodyIsencaoAcoes"></tbody>
       </table>
     </div>
   </div>
@@ -497,8 +523,27 @@ function calcularIR(){
 
 function renderTudo(){
   renderVendas();
+  renderIsencaoAcoes();
   renderIR();
   renderIRFii();
+}
+
+function renderIsencaoAcoes(){
+  const linhas = calcularIRVendasAcoesVista();
+  const tb = document.getElementById('tbodyIsencaoAcoes');
+  if(!tb) return;
+  if(!linhas.length){
+    tb.innerHTML = `<tr class="empty-row"><td colspan="4">Nenhuma venda de ação à vista lançada ainda.</td></tr>`;
+    return;
+  }
+  tb.innerHTML = linhas.map(l=>`<tr>
+      <td>${formatMes(l.mes)}</td>
+      <td>${BRL(l.vendas)}</td>
+      <td class="${l.ganho>=0?'pos':'neg'}">${BRL(l.ganho)}</td>
+      <td>${l.isento
+        ? '<span class="badge po">✓ Isento</span>'
+        : `<span class="badge aberta">Não — ${l.vendas>20000?'passou de R$20mil':'teve prejuízo'}</span>`}</td>
+    </tr>`).join('');
 }
 
 function statusDarfHtml(mes, regime, devido){
@@ -586,10 +631,11 @@ async function desmarcarDarf(id){
 // ------------------------------------------------- vendas à vista (ações/FII, fora de opção)
 
 function renderVendas(){
-  const vendas = DATA.vendas||[];
+  const filtroClasse = document.getElementById('filtroClasseVenda').value;
+  const vendas = (DATA.vendas||[]).filter(v=>!filtroClasse || (v.classe||'acao')===filtroClasse);
   const tb = document.getElementById('tbodyVendas');
   if(!vendas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma venda lançada ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="10">${(DATA.vendas||[]).length ? 'Nenhuma venda nessa classe.' : 'Nenhuma venda lançada ainda.'}</td></tr>`;
     return;
   }
   const dis = EDIT ? '' : 'disabled';

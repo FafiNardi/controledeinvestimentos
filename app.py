@@ -1600,8 +1600,11 @@ def rent_compute(cid):
             tot["base"] += base; tot["aporte"] += aporte
             tot["resgate"] += resgate; tot["proventos"] += prov
             tot["final"] += final
-            # geração de caixa = rendimento do ativo (só p/ fundos caixa/DI)
-            if a.id in caixa_ids and mv:
+            # geração de caixa = rendimento do ativo (só p/ fundos caixa/DI) — "not estimado"
+            # é necessário: num mês ainda não fechado, final=base (placeholder), então a conta
+            # viraria "-aporte+resgate+prov" (um número real, não um placeholder neutro) se
+            # o usuário já tivesse lançado aporte/resgate/provento nesse mês sem fechar o saldo
+            if a.id in caixa_ids and mv and not estimado:
                 geracao_caixa += final - base - aporte + resgate + prov
             ultimo_final[a.id] = final
         # retorno da carteira no mês
@@ -1777,12 +1780,15 @@ RENT_FIELDS = {"valor_base", "aporte", "resgate", "proventos", "valor_final"}
 @app.route("/api/rent/mov", methods=["PUT"])
 @login_required
 def api_rent_mov():
-    d = request.get_json(force=True)
-    a = db.session.get(RentAtivo, int(d["ativo_id"]))
+    d = request.get_json(force=True) or {}
+    try:
+        ativo_id, ano, mes = int(d["ativo_id"]), int(d["ano"]), int(d["mes"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"erro": "informe ativo_id, ano e mês válidos"}), 400
+    a = db.session.get(RentAtivo, ativo_id)
     if not a:
         abort(404)
     require_owner(db.session.get(Carteira, a.carteira_id))
-    ano, mes = int(d["ano"]), int(d["mes"])
     mv = RentMov.query.filter_by(ativo_id=a.id, ano=ano, mes=mes).first()
     if not mv:
         mv = RentMov(ativo_id=a.id, ano=ano, mes=mes)
@@ -2385,13 +2391,22 @@ def api_darf_marcar(cid):
     regime = d.get("regime")
     if not mes or regime not in ("comum", "day"):
         return jsonify({"erro": "informe mês e regime válidos"}), 400
-    reg = DarfPagamento.query.filter_by(carteira_id=cid, mes=mes, regime=regime).first()
-    if not reg:
-        reg = DarfPagamento(carteira_id=cid, mes=mes, regime=regime)
-        db.session.add(reg)
-    reg.data_pagamento = d.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d")
-    reg.valor_pago = float(d.get("valor_pago") or 0)
-    db.session.commit()
+    # mesmo risco de corrida do api_preco_teto_salvar: duas marcações quase simultâneas pro
+    # mesmo (carteira_id, mes, regime) podem estourar o UniqueConstraint no commit.
+    try:
+        reg = DarfPagamento.query.filter_by(carteira_id=cid, mes=mes, regime=regime).first()
+        if not reg:
+            reg = DarfPagamento(carteira_id=cid, mes=mes, regime=regime)
+            db.session.add(reg)
+        reg.data_pagamento = d.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d")
+        reg.valor_pago = float(d.get("valor_pago") or 0)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        reg = DarfPagamento.query.filter_by(carteira_id=cid, mes=mes, regime=regime).first()
+        reg.data_pagamento = d.get("data_pagamento") or datetime.now().strftime("%Y-%m-%d")
+        reg.valor_pago = float(d.get("valor_pago") or 0)
+        db.session.commit()
     return jsonify({"ok": True, "id": reg.id})
 
 
@@ -2528,8 +2543,10 @@ def api_yield_on_cost(cid):
         # cacheado pelo Rebalanceamento — só existe enquanto o ativo ainda está lá cadastrado
         # e com cotação buscada; serve de referência pra comparar com o yield-on-cost (que é
         # sobre o preço pago, não o de mercado), então fica None pra ativo já vendido/sem
-        # cotação, sem tentar estimar nada.
-        dy_mercado = asset.dy if (asset and asset.dy) else None
+        # cotação, sem tentar estimar nada. Usa updated_at (preenchido só quando a cotação é
+        # buscada de verdade) em vez de "asset.dy" pra decidir se tem dado — um DY real de 0%
+        # é diferente de "nunca buscou cotação", mas "if asset.dy" tratava os dois como igual.
+        dy_mercado = asset.dy if (asset and asset.updated_at) else None
         linhas.append({
             "nome": ra.nome, "classe": ra.classe or "", "investido": investido,
             "total": total, "m24": m24, "m12": m12, "ano": ano,
@@ -2723,13 +2740,24 @@ def api_preco_teto_salvar():
     dados = d.get("dados") or {}
     if not isinstance(dados, dict):
         return jsonify({"erro": "dados inválidos"}), 400
-    premissa = PrecoTetoPremissa.query.filter_by(asset_id=a.id, metodo=metodo).first()
-    if not premissa:
-        premissa = PrecoTetoPremissa(asset_id=a.id, metodo=metodo)
-        db.session.add(premissa)
-    premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
-    premissa.atualizado_em = datetime.utcnow()
-    db.session.commit()
+    # duas abas/requisições salvando a MESMA premissa (asset_id, metodo) quase ao mesmo tempo
+    # podem passar pelo .first() (sem achar nada) antes de qualquer uma commitar — a segunda
+    # tentativa de INSERT esbarra no UniqueConstraint(asset_id, metodo) e estoura IntegrityError
+    # (mesmo padrão de bug já visto em garantir_historico_indices); re-tenta como UPDATE.
+    try:
+        premissa = PrecoTetoPremissa.query.filter_by(asset_id=a.id, metodo=metodo).first()
+        if not premissa:
+            premissa = PrecoTetoPremissa(asset_id=a.id, metodo=metodo)
+            db.session.add(premissa)
+        premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
+        premissa.atualizado_em = datetime.utcnow()
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        premissa = PrecoTetoPremissa.query.filter_by(asset_id=a.id, metodo=metodo).first()
+        premissa.dados_json = json.dumps({k: float(v or 0) for k, v in dados.items()})
+        premissa.atualizado_em = datetime.utcnow()
+        db.session.commit()
     return jsonify({"ok": True, "id": premissa.id, "atualizado_em": premissa.atualizado_em.isoformat()})
 
 

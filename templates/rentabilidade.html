@@ -546,6 +546,10 @@ function classesAtuais(){ return ['', ...(MOEDA==='USD'?CLASSES_RENT_USD:CLASSES
 let MOEDA = 'BRL';
 const BRL = v => (MOEDA==='USD'?'US$ ':'R$ ') + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => v==null ? '—' : (v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
+// classe de cor pra um valor de retorno/acumulado que pode vir null (mês sem dado, ou
+// denominador zero no cálculo) — sem o check de null, "null>=0" dá true em JS e pintava
+// de verde (pos) uma célula mostrando "—", como se fosse um retorno positivo
+const classePct = v => v==null ? '' : (v>=0?'pos':'neg');
 function pesoBarHTML(peso){
   const pct = (peso*100).toFixed(1);
   const w = Math.max(0,Math.min(100,peso*100));
@@ -976,7 +980,7 @@ function renderizarDetalheJanela(){
       <td style="text-align:left">${MESES[+m-1]}/${a}</td>
       <td>${BRL(h.base)}</td><td>${BRL(h.aporte)}</td><td>${BRL(h.resgate)}</td>
       <td>${BRL(h.proventos)}</td><td>${h.final_estimado ? '<span class="muted" title="Mês ainda não fechado">— não fechou —</span>' : BRL(h.final)}</td>
-      <td class="${h.rent>=0?'pos':'neg'}">${h.final_estimado ? '<span class="muted">—</span>' : PCT(h.rent)}</td>
+      <td class="${classePct(h.rent)}">${h.final_estimado ? '<span class="muted">—</span>' : PCT(h.rent)}</td>
       <td class="${h.acumulado>=0?'pos':'neg'}">${PCT(h.acumulado)}</td>
     </tr>`;
   }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum lançamento ainda.</td></tr>`;
@@ -1200,7 +1204,7 @@ function renderMes(){
         placeholder="${moedaHint}"
         title="${l.final_estimado && l.tem_mov ? 'Mês ainda não fechado. Enquanto não preencher, usamos o saldo anterior só por baixo dos panos pra calcular a rentabilidade — sem mostrar esse número aqui, já que numa renda variável ele pode ficar bem diferente do valor real.' : ''}"
         ${dis} onfocus="this.select()" onchange="mov(${l.ativo_id},'valor_final',this.value)"></td>
-      <td class="${l.rent>=0?'pos':'neg'}">${PCT(l.rent)}</td>
+      <td class="${classePct(l.rent)}">${PCT(l.rent)}</td>
       <td>${pesoBarHTML(l.peso)}</td>
       <td>${EDIT?`<button class="del" title="excluir ativo e todo o histórico" onclick="delAtivo(${l.ativo_id})">×</button>`:''}</td>
     </tr>`;
@@ -1255,10 +1259,10 @@ function renderStats(){
   const rotulo = `${MESES[MES-1]}/${ANO}`;
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Patrimônio (${rotulo})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
-    <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md&&md.rent>=0?'pos':'neg'}">${md?PCT(md.rent):'—'}</div></div>
+    <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md?classePct(md.rent):''}">${md?PCT(md.rent):'—'}</div></div>
     <div class="stat"><div class="k">Dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.dividendos):'—'}</div></div>
     <div class="stat"><div class="k">Ger. caixa + dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.geracao_total):'—'}</div></div>
-    <div class="stat"><div class="k">Acumulado até ${rotulo}</div><div class="v ${md&&md.acumulado>=0?'pos':'neg'}">${md&&md.acumulado!=null?PCT(md.acumulado):'—'}</div></div>
+    <div class="stat"><div class="k">Acumulado até ${rotulo}</div><div class="v ${md?classePct(md.acumulado):''}">${md&&md.acumulado!=null?PCT(md.acumulado):'—'}</div></div>
     <div class="stat"><div class="k">Ger. caixa + proventos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(geracaoAteAqui)}</div></div>
     <div class="stat"><div class="k">Valor Investido até ${rotulo}</div><div class="v">${BRL(investidoAteAqui)}</div></div>
     <div class="stat"><div class="k">Dividendos Recebidos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(dividendosAteAqui)}</div></div>
@@ -1590,7 +1594,7 @@ function atualizarColunasCalculadas(){
     if(!l) return;
     const tds = tr.querySelectorAll('td');
     const tdRent = tds[8], tdPeso = tds[9];
-    if(tdRent){ tdRent.className = l.rent>=0?'pos':'neg'; tdRent.textContent = PCT(l.rent); }
+    if(tdRent){ tdRent.className = classePct(l.rent); tdRent.textContent = PCT(l.rent); }
     if(tdPeso){ tdPeso.innerHTML = pesoBarHTML(l.peso); }
   });
 }

@@ -258,10 +258,9 @@
     6015), até o último dia útil do mês seguinte. <b>Quando uma CALL vendida é exercida</b>,
     o prêmio não é renda de opção — ele é somado ao valor de venda da ação e entra, no
     regime comum, na <b>mesma apuração mensal</b> das opções (uma perda abate a outra, o
-    mesmo mínimo de R$10 vale pra soma dos dois), podendo ficar isento se as vendas de ações
-    do mês (valor vendido, não o lucro) somarem até R$20.000 — isenção que considera só as
-    vendas geradas por exercício que este app conhece; se você também vendeu outras ações no
-    mesmo mês fora daqui, some manualmente antes de confiar no "Isento" da coluna abaixo.
+    mesmo mínimo de R$10 vale pra soma dos dois). Essa venda <b>nunca entra na isenção de
+    R$20.000/mês</b> — a isenção vale só pra venda "normal" no mercado à vista, não pra
+    ação entregue por exercício de opção (IN RFB 1.585/2015, art. 59 §2º, IV).
     <b>PUT exercida não entra em nenhum cálculo</b>: o prêmio reduz o preço de compra da ação
     adquirida, sem imposto devido agora — só quando essa ação for vendida no futuro.
   </p>
@@ -270,13 +269,18 @@
       title="Baixa um PDF com todas as operações e a apuração mensal de IR, organizado por ano — útil pra declarar e conferir o valor devido">
       📄 Baixar relatório (PDF)
     </button>
+    <label class="ctx-label" title="Prejuízo de renda variável (regime comum) que já existia ANTES do histórico lançado aqui — ex.: saldo que já constava na sua declaração de IR do ano anterior. Entra como ponto de partida da compensação do primeiro mês.">
+      Prejuízo inicial (regime comum)
+      <input id="inputPrejuizoInicial" type="text" inputmode="decimal" style="width:110px"
+        onfocus="this.select()" onchange="salvarPrejuizoInicial(this.value)">
+    </label>
   </div>
   <div class="ledger">
     <div class="tbl-scroll">
       <table>
         <thead><tr>
           <th>Mês</th><th>Regime</th><th>Resultado opções</th>
-          <th title="Ganho tributável da venda de ações por exercício de CALL nesse mês — 'Isento' se as vendas do mês somarem até R$20mil">Resultado ações (exercício)</th>
+          <th title="Ganho tributável da venda de ações por exercício de CALL nesse mês — sempre tributável, não entra na isenção de R$20mil (vale só pra venda normal no mercado à vista)">Resultado ações (exercício)</th>
           <th>Prejuízo compensado</th>
           <th>Base de cálculo</th><th>Alíquota</th><th>IR calculado</th>
           <th title="Valor que ainda não bateu R$10 — não precisa pagar agora, some com o próximo mês">Acumulado (&lt; R$10)</th>
@@ -386,8 +390,26 @@ async function load(){
   document.getElementById('roBadge').innerHTML = EDIT ? '' :
     `<span class="ro-badge">👁 Somente leitura · de ${DATA.carteira.dono}</span>`;
   document.getElementById('addbar').style.display = EDIT ? '' : 'none';
+  const inputPJ = document.getElementById('inputPrejuizoInicial');
+  inputPJ.value = BRL(DATA.carteira.prejuizo_inicial_ir || 0);
+  inputPJ.disabled = !EDIT;
   popularFiltros();
   renderTudo();
+}
+
+async function salvarPrejuizoInicial(valor){
+  const num = Math.abs(parseMoeda(valor));
+  try{
+    const r = await fetch('/api/carteira/'+CID+'/opcoes/prejuizo-inicial',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({valor:num})});
+    if(!r.ok){ alert('Não consegui salvar o prejuízo inicial.'); await load(); return; }
+    DATA.carteira.prejuizo_inicial_ir = num;
+    document.getElementById('inputPrejuizoInicial').value = BRL(num);
+    renderIR();
+  } catch(e){
+    alert('Falha de rede ao salvar o prejuízo inicial — recarregando.');
+    await load();
+  }
 }
 
 // ---------------------------------------------------------------- cálculos
@@ -507,11 +529,16 @@ function renderTudo(){
 }
 
 // Agrega, por mês, as vendas de ações geradas por exercício de CALL: total vendido (strike
-// × quantidade — testa a isenção de R$20mil) e o ganho (lucroTotalOperacao). 'isento' só é
-// true com venda ≤ R$20mil E ganho positivo — um PREJUÍZO não é "isento", ele continua
-// contando (negativo) pra poder abater ganho futuro; a isenção só dispensa o imposto sobre
-// um GANHO, nunca apaga um prejuízo. Não calcula IR/DARF sozinho — dentro do regime comum,
-// ações e opções entram na MESMA apuração mensal (calcularIR, logo abaixo).
+// × quantidade, só informativo) e o ganho (lucroTotalOperacao).
+//
+// IMPORTANTE (corrigido em 2026-11 a partir de documento com a regra certa, IN RFB
+// 1.585/2015 art. 59 §2º, inciso IV): venda de ação por EXERCÍCIO DE OPÇÃO nunca entra na
+// isenção de R$20 mil/mês — essa isenção vale só pra venda "normal" no mercado à vista.
+// Por isso 'isento' é sempre false aqui; o ganho (positivo OU negativo) sempre contribui
+// pra base de cálculo, sem teste de limite nenhum. (Antes desta correção testava
+// vendas<=20000 e marcava como isento — estava errado, subestimava o IR devido.) Não
+// calcula IR/DARF sozinho — dentro do regime comum, ações e opções entram na MESMA
+// apuração mensal (calcularIR, logo abaixo).
 function calcularIRAcoesExercicio(){
   const exercidasCall = (DATA.operacoes||[]).filter(o=>o.tipo==='CALL' && o.status==='exercida' && o.preco_medio);
   const porMes = {};
@@ -523,12 +550,10 @@ function calcularIRAcoesExercicio(){
     bucket.vendas += (o.strike||0) * (o.quantidade||0);
     bucket.ganho += (lucroTotalOperacao(o)||0);
   });
-  const LIMITE_ISENCAO_VENDAS = 20000;
   const linhas = [];
   Object.keys(porMes).sort().forEach(mes=>{
     const {vendas, ganho} = porMes[mes];
-    const isento = vendas <= LIMITE_ISENCAO_VENDAS && ganho > 0;
-    linhas.push({mes, vendas, ganho, isento});
+    linhas.push({mes, vendas, ganho, isento:false});
   });
   return linhas;
 }
@@ -562,7 +587,10 @@ function calcularIR(){
   [['comum',0.15],['day',0.20]].forEach(([regime,aliquota])=>{
     const meses = new Set(Object.keys(resultadoOpcoes[regime]));
     if(regime==='comum') Object.keys(acoesPorMes).forEach(m=>meses.add(m));
-    let prejuizo = 0;     // sempre <= 0
+    // prejuízo inicial (regime comum) vindo de ANTES do histórico lançado no app — saldo
+    // que já constava na declaração de IR de um ano anterior, por exemplo
+    let prejuizo = (regime==='comum' && DATA.carteira && DATA.carteira.prejuizo_inicial_ir)
+      ? -Math.abs(DATA.carteira.prejuizo_inicial_ir) : 0;     // sempre <= 0
     let irPendente = 0;   // imposto já calculado mas ainda abaixo de R$10, aguardando somar
     [...meses].sort().forEach(mes=>{
       const resultadoOpcoesMes = resultadoOpcoes[regime][mes] || 0;

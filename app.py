@@ -109,6 +109,11 @@ class Carteira(db.Model):
     renda_ref_json = db.Column(db.Text, default="")  # {"2017": 1000, "2018": 1200, ...} - por ano
     anos_json = db.Column(db.Text, default="")      # anos extras criados manualmente (ex.: "2017,2018")
     moeda = db.Column(db.String(3), default="BRL")  # BRL ou USD (só formatação de exibição)
+    # prejuízo de renda variável (regime comum: ações+opções) vindo de ANTES do histórico
+    # lançado no app — ex.: saldo que já constava na declaração de IR do ano anterior,
+    # numa outra corretora, etc. Entra como ponto de partida da compensação do primeiro
+    # mês com dado (Receita permite compensar prejuízo sem limite de prazo).
+    prejuizo_inicial_ir = db.Column(db.Float, default=0)
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
     # Faltava isso: sem essa relação, apagar uma carteira só limpava os ativos do
     # Rebalanceamento (assets acima) — os da Rentabilidade (RentAtivo/RentMov) ficavam
@@ -1860,9 +1865,23 @@ def api_opcoes(cid):
         "operacoes": out,
         "darfs": darfs_out,
         "ativos": ativos_out,
-        "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL"},
+        "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL",
+                     "prejuizo_inicial_ir": c.prejuizo_inicial_ir or 0},
         "editavel": c.user_id == current_user.id,
     })
+
+
+@app.route("/api/carteira/<int:cid>/opcoes/prejuizo-inicial", methods=["POST"])
+@login_required
+def api_opcoes_prejuizo_inicial(cid):
+    """Salva o saldo de prejuízo (regime comum) vindo de ANTES do histórico lançado no
+    app — ex.: saldo que já constava na declaração de IR do ano anterior."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True) or {}
+    c.prejuizo_inicial_ir = abs(float(d.get("valor") or 0))
+    db.session.commit()
+    return jsonify({"ok": True, "prejuizo_inicial_ir": c.prejuizo_inicial_ir})
 
 
 @app.route("/api/carteira/<int:cid>/opcoes", methods=["POST"])
@@ -2002,13 +2021,18 @@ def _lucro_total_operacao(o):
 
 def calcular_ir_acoes_exercicio(operacoes):
     """Agrega, por mês, as vendas de ações geradas por exercício de CALL: total vendido
-    (strike × quantidade — testa a isenção de R$20mil) e o ganho (lucro_total_operacao).
-    'isento' só é True com venda ≤ R$20mil E ganho positivo — um PREJUÍZO não é "isento",
-    ele continua contando (negativo) pra poder abater ganho futuro; a isenção só dispensa
-    o imposto sobre um GANHO, nunca apaga um prejuízo. Não calcula IR/DARF sozinho — pela
-    regra da Receita, dentro do regime comum, ações e opções entram na MESMA apuração
-    mensal (uma perda abate a outra, o mesmo mínimo de R$10 vale pra soma dos dois); isso
-    é só o insumo de calcular_ir_opcoes."""
+    (strike × quantidade, só informativo) e o ganho (lucro_total_operacao).
+
+    IMPORTANTE (corrigido em 2026-11 a partir de documento com a regra certa, IN RFB
+    1.585/2015 art. 59 §2º, inciso IV): venda de ação por EXERCÍCIO DE OPÇÃO nunca entra
+    na isenção de R$20 mil/mês — essa isenção vale só pra venda "normal" no mercado à
+    vista. Por isso 'isento' é sempre False aqui; o ganho (positivo OU negativo) sempre
+    contribui pra base de cálculo, sem teste de limite nenhum. (Antes desta correção o
+    código testava vendas<=20000 e marcava como isento — estava errado, subestimava o IR
+    devido nos meses de exercício.) Não calcula IR/DARF sozinho — pela regra da Receita,
+    dentro do regime comum, ações e opções entram na MESMA apuração mensal (uma perda
+    abate a outra, o mesmo mínimo de R$10 vale pra soma dos dois); isso é só o insumo de
+    calcular_ir_opcoes."""
     exercidas_call = [o for o in operacoes
                       if o.tipo == "CALL" and o.status == "exercida" and o.preco_medio]
     por_mes = {}
@@ -2021,16 +2045,14 @@ def calcular_ir_acoes_exercicio(operacoes):
         bucket["vendas"] += (o.strike or 0) * (o.quantidade or 0)
         bucket["ganho"] += (_lucro_total_operacao(o) or 0)
 
-    LIMITE_ISENCAO_VENDAS = 20000
     linhas = []
     for mes in sorted(por_mes):
         vendas, ganho = por_mes[mes]["vendas"], por_mes[mes]["ganho"]
-        isento = vendas <= LIMITE_ISENCAO_VENDAS and ganho > 0
-        linhas.append({"mes": mes, "vendas": vendas, "ganho": ganho, "isento": isento})
+        linhas.append({"mes": mes, "vendas": vendas, "ganho": ganho, "isento": False})
     return linhas
 
 
-def calcular_ir_opcoes(operacoes):
+def calcular_ir_opcoes(operacoes, prejuizo_inicial_comum=0.0):
     """Port exato do calcularIR() de templates/opcoes.html pro Python — precisa existir
     aqui também porque o relatório em PDF é montado no servidor. Qualquer mudança na
     fórmula de um lado (alíquota, mínimo de DARF, regra de compensação) tem que ser
@@ -2042,7 +2064,12 @@ def calcular_ir_opcoes(operacoes):
     Rafael em 2026-10: antes essas duas coisas eram apuradas em separado, o que está
     errado — a Receita soma tudo que é regime comum de renda variável no mesmo mês, só
     não deixa prejuízo de um 'mercado' vazar pro day trade ou vice-versa). Day trade
-    continua só de opções — um exercício nunca é considerado day trade da ação em si."""
+    continua só de opções — um exercício nunca é considerado day trade da ação em si.
+
+    prejuizo_inicial_comum: saldo de prejuízo (regime comum) vindo de ANTES do histórico
+    lançado no app (ex.: saldo já declarado no IR do ano anterior) — entra como ponto de
+    partida da compensação do primeiro mês com dado, só no regime comum (day trade não
+    tem saldo anterior conhecido)."""
     fechadas = [o for o in operacoes if (o.status or "aberta") not in ("aberta", "exercida")]
     resultado_opcoes = {"comum": {}, "day": {}}
     for o in fechadas:
@@ -2061,7 +2088,7 @@ def calcular_ir_opcoes(operacoes):
         meses = set(resultado_opcoes[regime])
         if regime == "comum":
             meses |= set(acoes_por_mes)
-        prejuizo = 0.0
+        prejuizo = -abs(prejuizo_inicial_comum) if regime == "comum" and prejuizo_inicial_comum else 0.0
         ir_pendente = 0.0
         for mes in sorted(meses):
             resultado_opcoes_mes = resultado_opcoes[regime].get(mes, 0.0)
@@ -2372,7 +2399,7 @@ def api_opcoes_relatorio_pdf(cid):
     require_owner(c)
     ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
     darfs_pagos = {(d.mes, d.regime): d for d in DarfPagamento.query.filter_by(carteira_id=cid).all()}
-    linhas_ir = calcular_ir_opcoes(ops)
+    linhas_ir = calcular_ir_opcoes(ops, c.prejuizo_inicial_ir or 0)
     pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, darfs_pagos)
     nome_arquivo = f"opcoes_{c.nome}_{datetime.now().strftime('%Y%m%d')}.pdf" \
         .replace(" ", "_").replace("/", "-")
@@ -2830,6 +2857,7 @@ def ensure_schema():
     add("opcao_op", "custo_exercicio", "custo_exercicio FLOAT DEFAULT 0")
     add("opcao_op", "operacao", "operacao VARCHAR(6) DEFAULT 'venda'")
     add("preco_teto_premissa", "atualizado_em", "atualizado_em TIMESTAMP")
+    add("carteira", "prejuizo_inicial_ir", "prejuizo_inicial_ir FLOAT DEFAULT 0")
     cols = colunas_de("rent_ativo")
     if cols is not None:
         if "classe" in cols and "is_caixa" in cols:

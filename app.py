@@ -114,6 +114,9 @@ class Carteira(db.Model):
     # numa outra corretora, etc. Entra como ponto de partida da compensação do primeiro
     # mês com dado (Receita permite compensar prejuízo sem limite de prazo).
     prejuizo_inicial_ir = db.Column(db.Float, default=0)
+    # mesma ideia, mas pro regime próprio de FII (prejuízo de FII não mistura com
+    # ações/opções — ver VendaAtivo)
+    prejuizo_inicial_fii = db.Column(db.Float, default=0)
     assets = db.relationship("Asset", backref="carteira", cascade="all, delete-orphan")
     # Faltava isso: sem essa relação, apagar uma carteira só limpava os ativos do
     # Rebalanceamento (assets acima) — os da Rentabilidade (RentAtivo/RentMov) ficavam
@@ -122,6 +125,7 @@ class Carteira(db.Model):
     # com dado de Rentabilidade tinha sido excluída ainda.
     rentativos = db.relationship("RentAtivo", cascade="all, delete-orphan")
     opcoes = db.relationship("OpcaoOp", cascade="all, delete-orphan")
+    vendas_ativos = db.relationship("VendaAtivo", cascade="all, delete-orphan")
     darfs = db.relationship("DarfPagamento", cascade="all, delete-orphan")
 
 
@@ -230,6 +234,28 @@ class OpcaoOp(db.Model):
     custo_exercicio = db.Column(db.Float, default=0)
     obs = db.Column(db.Text, default="")
     ordem = db.Column(db.Integer, default=0)
+
+
+class VendaAtivo(db.Model):
+    """Venda de ação ou cota de FII no mercado à vista, FORA de opção (sem passar por
+    OpcaoOp) — ex.: venda direta de uma ação que você já tinha, não gerada por exercício.
+    Existe separado de OpcaoOp porque a regra de IR é bem diferente por classe:
+      - 'acao': entra no MESMO regime comum das opções/exercícios (15%, mesmo prejuízo
+        acumulado), e é a ÚNICA categoria que testa a isenção de R$20mil/mês de verdade
+        (venda por exercício de opção nunca tem essa isenção — ver calcular_ir_opcoes).
+      - 'fii': regime totalmente separado — sempre tributável a 20%, NUNCA tem isenção
+        de R$20mil (Lei 11.196/2005, art. 3º, XIII), e o prejuízo de FII só compensa
+        prejuízo de FII (não mistura com ações/opções)."""
+    id = db.Column(db.Integer, primary_key=True)
+    carteira_id = db.Column(db.Integer, db.ForeignKey("carteira.id"), nullable=False)
+    ticker = db.Column(db.String(40), nullable=False, default="")
+    classe = db.Column(db.String(6), nullable=False, default="acao")  # acao ou fii
+    data_venda = db.Column(db.String(10), default="")   # YYYY-MM-DD
+    quantidade = db.Column(db.Float, default=0)
+    valor_venda = db.Column(db.Float, default=0)    # total recebido na venda
+    custo_total = db.Column(db.Float, default=0)     # custo de aquisição total das cotas/ações vendidas
+    demais_custos = db.Column(db.Float, default=0)   # corretagem/emolumentos da venda
+    obs = db.Column(db.Text, default="")
 
 
 class DarfPagamento(db.Model):
@@ -1856,6 +1882,11 @@ def api_opcoes(cid):
     darfs = DarfPagamento.query.filter_by(carteira_id=cid).all()
     darfs_out = [{"id": d.id, "mes": d.mes, "regime": d.regime,
                   "data_pagamento": d.data_pagamento or "", "valor_pago": d.valor_pago or 0} for d in darfs]
+    vendas = VendaAtivo.query.filter_by(carteira_id=cid).order_by(VendaAtivo.data_venda, VendaAtivo.id).all()
+    vendas_out = [{"id": v.id, "ticker": v.ticker, "classe": v.classe or "acao",
+                   "data_venda": v.data_venda or "", "quantidade": v.quantidade or 0,
+                   "valor_venda": v.valor_venda or 0, "custo_total": v.custo_total or 0,
+                   "demais_custos": v.demais_custos or 0, "obs": v.obs or ""} for v in vendas]
     # valor investido por ativo (num_ações × preço médio) do Rebalanceamento — pro relatório
     # de "dividend yield" das opções (prêmio recebido ÷ capital investido na ação)
     assets = Asset.query.filter_by(carteira_id=cid).all()
@@ -1864,9 +1895,11 @@ def api_opcoes(cid):
     return jsonify({
         "operacoes": out,
         "darfs": darfs_out,
+        "vendas": vendas_out,
         "ativos": ativos_out,
         "carteira": {"id": c.id, "nome": c.nome, "dono": c.dono.nome, "moeda": c.moeda or "BRL",
-                     "prejuizo_inicial_ir": c.prejuizo_inicial_ir or 0},
+                     "prejuizo_inicial_ir": c.prejuizo_inicial_ir or 0,
+                     "prejuizo_inicial_fii": c.prejuizo_inicial_fii or 0},
         "editavel": c.user_id == current_user.id,
     })
 
@@ -1882,6 +1915,83 @@ def api_opcoes_prejuizo_inicial(cid):
     c.prejuizo_inicial_ir = abs(float(d.get("valor") or 0))
     db.session.commit()
     return jsonify({"ok": True, "prejuizo_inicial_ir": c.prejuizo_inicial_ir})
+
+
+@app.route("/api/carteira/<int:cid>/opcoes/prejuizo-inicial-fii", methods=["POST"])
+@login_required
+def api_opcoes_prejuizo_inicial_fii(cid):
+    """Mesma ideia do prejuízo inicial de ações/opções, mas pro regime próprio de FII —
+    não mistura com o de cima."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True) or {}
+    c.prejuizo_inicial_fii = abs(float(d.get("valor") or 0))
+    db.session.commit()
+    return jsonify({"ok": True, "prejuizo_inicial_fii": c.prejuizo_inicial_fii})
+
+
+VENDA_ATIVO_FIELDS = {"ticker", "classe", "data_venda", "quantidade", "valor_venda",
+                      "custo_total", "demais_custos", "obs"}
+VENDA_ATIVO_NUM_FIELDS = {"quantidade", "valor_venda", "custo_total", "demais_custos"}
+
+
+@app.route("/api/carteira/<int:cid>/vendas-ativos", methods=["POST"])
+@login_required
+def api_venda_ativo_add(cid):
+    """Venda de ação ou FII no mercado à vista, fora de opção — alimenta a apuração de
+    IR igual uma operação de opção, mas com a regra de cada classe (ver calcular_ir_opcoes
+    e calcular_ir_fii)."""
+    c = get_carteira_or_404(cid)
+    require_owner(c)
+    d = request.get_json(force=True) or {}
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    data_venda = d.get("data_venda") or hoje
+    try:
+        datetime.strptime(data_venda, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"erro": "data inválida em 'data_venda': use o formato AAAA-MM-DD"}), 400
+    v = VendaAtivo(carteira_id=cid, ticker=(d.get("ticker") or "").strip().upper(),
+                   classe=d.get("classe") if d.get("classe") in ("acao", "fii") else "acao",
+                   data_venda=data_venda, quantidade=float(d.get("quantidade") or 0),
+                   valor_venda=float(d.get("valor_venda") or 0),
+                   custo_total=float(d.get("custo_total") or 0),
+                   demais_custos=float(d.get("demais_custos") or 0))
+    db.session.add(v)
+    db.session.commit()
+    return jsonify({"ok": True, "id": v.id})
+
+
+@app.route("/api/vendas-ativos/<int:vid>", methods=["PUT", "DELETE"])
+@login_required
+def api_venda_ativo_editar(vid):
+    v = db.session.get(VendaAtivo, vid)
+    if not v:
+        abort(404)
+    require_owner(db.session.get(Carteira, v.carteira_id))
+    if request.method == "DELETE":
+        db.session.delete(v)
+        db.session.commit()
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    if "data_venda" in d and d["data_venda"]:
+        try:
+            datetime.strptime(d["data_venda"], "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"erro": "data inválida em 'data_venda': use o formato AAAA-MM-DD"}), 400
+    for k, val in d.items():
+        if k not in VENDA_ATIVO_FIELDS:
+            continue
+        if k in VENDA_ATIVO_NUM_FIELDS:
+            setattr(v, k, float(val or 0))
+        elif k == "ticker":
+            v.ticker = (val or "").strip().upper()
+        elif k == "classe":
+            if val in ("acao", "fii"):
+                v.classe = val
+        else:
+            setattr(v, k, val)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/carteira/<int:cid>/opcoes", methods=["POST"])
@@ -2052,24 +2162,89 @@ def calcular_ir_acoes_exercicio(operacoes):
     return linhas
 
 
-def calcular_ir_opcoes(operacoes, prejuizo_inicial_comum=0.0):
+def calcular_ir_vendas_acoes_vista(vendas):
+    """Vendas de AÇÃO no mercado à vista, lançadas direto (não via exercício de opção —
+    essas ficam em calcular_ir_acoes_exercicio). É a ÚNICA categoria que testa de
+    verdade a isenção de R$20mil/mês: venda por exercício de opção NUNCA tem essa
+    isenção (ver calcular_ir_acoes_exercicio); 'isento' aqui só é True com vendas do mês
+    ≤ R$20mil E ganho positivo — um prejuízo nunca é isento, continua contando
+    (negativo) pra compensar depois."""
+    por_mes = {}
+    for v in vendas:
+        if (v.classe or "acao").lower() != "acao":
+            continue
+        mes = (v.data_venda or "")[:7]
+        if not mes:
+            continue
+        bucket = por_mes.setdefault(mes, {"vendas": 0.0, "ganho": 0.0})
+        bucket["vendas"] += v.valor_venda or 0
+        bucket["ganho"] += (v.valor_venda or 0) - (v.custo_total or 0) - (v.demais_custos or 0)
+
+    LIMITE_ISENCAO_VENDAS = 20000
+    linhas = []
+    for mes in sorted(por_mes):
+        vendas_mes, ganho = por_mes[mes]["vendas"], por_mes[mes]["ganho"]
+        isento = vendas_mes <= LIMITE_ISENCAO_VENDAS and ganho > 0
+        linhas.append({"mes": mes, "vendas": vendas_mes, "ganho": ganho, "isento": isento})
+    return linhas
+
+
+def calcular_ir_fii(vendas, prejuizo_inicial_fii=0.0):
+    """Apuração de FII — regime TOTALMENTE separado de ações/opções: sempre tributável a
+    20% (Lei 11.196/2005, art. 3º, XIII — nunca tem a isenção de R$20mil, mesmo vendendo
+    pouco), e o prejuízo de FII só compensa prejuízo de FII (não entra na mesma conta das
+    ações/opções). Mesma regra de mínimo R$10 pra dispensa de DARF."""
+    por_mes = {}
+    for v in vendas:
+        if (v.classe or "acao").lower() != "fii":
+            continue
+        mes = (v.data_venda or "")[:7]
+        if not mes:
+            continue
+        resultado = (v.valor_venda or 0) - (v.custo_total or 0) - (v.demais_custos or 0)
+        por_mes[mes] = por_mes.get(mes, 0.0) + resultado
+
+    MINIMO_DARF = 10
+    aliquota = 0.20
+    linhas = []
+    prejuizo = -abs(prejuizo_inicial_fii) if prejuizo_inicial_fii else 0.0
+    ir_pendente = 0.0
+    for mes in sorted(por_mes):
+        resultado_mes = por_mes[mes]
+        base = resultado_mes + prejuizo
+        ir_calculado = base * aliquota if base > 0 else 0
+        disponivel = ir_calculado + ir_pendente
+        devido = disponivel if disponivel >= MINIMO_DARF else 0
+        linhas.append({
+            "mes": mes, "resultado_mes": resultado_mes, "prejuizo_compensado": prejuizo,
+            "base": base, "aliquota": aliquota, "ir_calculado": ir_calculado, "devido": devido,
+        })
+        prejuizo = 0.0 if base > 0 else base
+        ir_pendente = 0.0 if devido > 0 else disponivel
+    return linhas
+
+
+def calcular_ir_opcoes(operacoes, vendas_acoes=None, prejuizo_inicial_comum=0.0):
     """Port exato do calcularIR() de templates/opcoes.html pro Python — precisa existir
     aqui também porque o relatório em PDF é montado no servidor. Qualquer mudança na
     fórmula de um lado (alíquota, mínimo de DARF, regra de compensação) tem que ser
     replicada no outro, senão a tela e o PDF passam a mostrar números diferentes.
 
     Combina, dentro do regime COMUM, o resultado de opções (sem exercidas) com o ganho
-    tributável da venda de ações por exercício de CALL — mesma apuração mensal, mesmo
-    prejuízo acumulado, mesmo mínimo de R$10 pra dispensa de DARF (correção pedida pelo
-    Rafael em 2026-10: antes essas duas coisas eram apuradas em separado, o que está
-    errado — a Receita soma tudo que é regime comum de renda variável no mesmo mês, só
-    não deixa prejuízo de um 'mercado' vazar pro day trade ou vice-versa). Day trade
-    continua só de opções — um exercício nunca é considerado day trade da ação em si.
+    tributável da venda de ações — tanto por exercício de CALL quanto venda à vista
+    normal (vendas_acoes) — mesma apuração mensal, mesmo prejuízo acumulado, mesmo
+    mínimo de R$10 pra dispensa de DARF (correção pedida pelo Rafael em 2026-10: antes
+    essas coisas eram apuradas em separado, o que está errado — a Receita soma tudo que
+    é regime comum de renda variável no mesmo mês, só não deixa prejuízo de um 'mercado'
+    vazar pro day trade ou vice-versa). Day trade continua só de opções — um exercício
+    nunca é considerado day trade da ação em si. FII fica de fora completamente (regime
+    próprio — ver calcular_ir_fii).
 
     prejuizo_inicial_comum: saldo de prejuízo (regime comum) vindo de ANTES do histórico
     lançado no app (ex.: saldo já declarado no IR do ano anterior) — entra como ponto de
     partida da compensação do primeiro mês com dado, só no regime comum (day trade não
     tem saldo anterior conhecido)."""
+    vendas_acoes = vendas_acoes or []
     fechadas = [o for o in operacoes if (o.status or "aberta") not in ("aberta", "exercida")]
     resultado_opcoes = {"comum": {}, "day": {}}
     for o in fechadas:
@@ -2080,24 +2255,27 @@ def calcular_ir_opcoes(operacoes, prejuizo_inicial_comum=0.0):
         regime = "day" if (o.data_abertura and o.data_abertura == fech) else "comum"
         resultado_opcoes[regime][mes] = resultado_opcoes[regime].get(mes, 0) + (_resultado_opcao_para_ir(o) or 0)
 
-    acoes_por_mes = {l["mes"]: l for l in calcular_ir_acoes_exercicio(operacoes)}
+    exercicio_por_mes = {l["mes"]: l for l in calcular_ir_acoes_exercicio(operacoes)}
+    vista_por_mes = {l["mes"]: l for l in calcular_ir_vendas_acoes_vista(vendas_acoes)}
 
     MINIMO_DARF = 10
     linhas = []
     for regime, aliquota in (("comum", 0.15), ("day", 0.20)):
         meses = set(resultado_opcoes[regime])
         if regime == "comum":
-            meses |= set(acoes_por_mes)
+            meses |= set(exercicio_por_mes) | set(vista_por_mes)
         prejuizo = -abs(prejuizo_inicial_comum) if regime == "comum" and prejuizo_inicial_comum else 0.0
         ir_pendente = 0.0
         for mes in sorted(meses):
             resultado_opcoes_mes = resultado_opcoes[regime].get(mes, 0.0)
-            acoes = acoes_por_mes.get(mes) if regime == "comum" else None
-            # isento dispensa o imposto sobre o ganho de ações, mas não some da apuração:
-            # um ganho isento não entra na base (contribui 0); um prejuízo sempre entra
-            # (negativo), pra poder ser compensado depois
-            contrib_acoes = 0.0 if (acoes and acoes["isento"]) else (acoes["ganho"] if acoes else 0.0)
-            resultado_mes = resultado_opcoes_mes + contrib_acoes
+            ex = exercicio_por_mes.get(mes) if regime == "comum" else None
+            vi = vista_por_mes.get(mes) if regime == "comum" else None
+            # exercício nunca é isento (sempre contribui o ganho, positivo ou negativo);
+            # venda à vista normal testa a isenção de R$20mil de verdade — um ganho
+            # isento não entra na base (contribui 0), um prejuízo sempre entra
+            contrib_exercicio = ex["ganho"] if ex else 0.0
+            contrib_vista = 0.0 if (vi and vi["isento"]) else (vi["ganho"] if vi else 0.0)
+            resultado_mes = resultado_opcoes_mes + contrib_exercicio + contrib_vista
             base = resultado_mes + prejuizo
             ir_calculado = base * aliquota if base > 0 else 0
             disponivel = ir_calculado + ir_pendente
@@ -2105,9 +2283,12 @@ def calcular_ir_opcoes(operacoes, prejuizo_inicial_comum=0.0):
             linhas.append({
                 "regime": regime, "mes": mes,
                 "resultado_opcoes_mes": resultado_opcoes_mes,
-                "vendas_acoes_mes": acoes["vendas"] if acoes else 0.0,
-                "ganho_acoes_mes": acoes["ganho"] if acoes else 0.0,
-                "isento_acoes": acoes["isento"] if acoes else None,
+                "vendas_acoes_mes": ex["vendas"] if ex else 0.0,
+                "ganho_acoes_mes": ex["ganho"] if ex else 0.0,
+                "isento_acoes": ex["isento"] if ex else None,
+                "vendas_vista_mes": vi["vendas"] if vi else 0.0,
+                "ganho_vista_mes": vi["ganho"] if vi else 0.0,
+                "isento_vista": vi["isento"] if vi else None,
                 "resultado_mes": resultado_mes,
                 "prejuizo_compensado": prejuizo, "base": base, "aliquota": aliquota,
                 "ir_calculado": ir_calculado, "devido": devido,
@@ -2139,8 +2320,11 @@ def _fmt_mes_pdf(m):
     return f"{nomes[int(mes) - 1]}/{ano}"
 
 
-def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
-    """darfs_pagos: {(mes, regime): DarfPagamento}. Devolve os bytes do PDF pronto."""
+def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos, vendas=None, linhas_fii=None):
+    """darfs_pagos: {(mes, regime): DarfPagamento}. vendas/linhas_fii opcionais (vendas de
+    ações/FII à vista, fora de opção). Devolve os bytes do PDF pronto."""
+    vendas = vendas or []
+    linhas_fii = linhas_fii or []
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_LEFT
     from reportlab.lib.pagesizes import A4
@@ -2182,7 +2366,9 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
         return o.data_fechamento or o.data_vencimento or o.data_abertura or ""
 
     anos = sorted({chave_data(o)[:4] for o in ops if chave_data(o)}
-                  | {l["mes"][:4] for l in linhas_ir}) or [str(datetime.now().year)]
+                  | {l["mes"][:4] for l in linhas_ir}
+                  | {(v.data_venda or "")[:4] for v in vendas if v.data_venda}
+                  | {l["mes"][:4] for l in linhas_fii}) or [str(datetime.now().year)]
 
     for ano in anos:
         story.append(Paragraph(f"Ano-calendário {ano}", secao))
@@ -2207,11 +2393,30 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
         else:
             story.append(Paragraph("Nenhuma operação nesse ano.", styles["Normal"]))
 
+        vendas_ano = [v for v in vendas if (v.data_venda or "").startswith(ano)]
+        if vendas_ano:
+            story.append(Paragraph("Vendas no mercado à vista (fora de opção)", subsecao))
+            dados = [["Ativo", "Classe", "Data", "Venda", "Custo", "Demais custos", "Resultado"]]
+            for v in vendas_ano:
+                resultado_v = (v.valor_venda or 0) - (v.custo_total or 0) - (v.demais_custos or 0)
+                dados.append([
+                    v.ticker, "FII" if (v.classe or "").lower() == "fii" else "Ação",
+                    _fmt_data_pdf(v.data_venda), _fmt_moeda_pdf(v.valor_venda or 0),
+                    _fmt_moeda_pdf(v.custo_total or 0), _fmt_moeda_pdf(v.demais_custos or 0),
+                    _fmt_moeda_pdf(resultado_v),
+                ])
+            tv = Table(dados, repeatRows=1,
+                       colWidths=[2 * cm, 1.3 * cm, 1.8 * cm, 2.2 * cm, 2.2 * cm, 2.2 * cm, 2.2 * cm])
+            tv.setStyle(estilo_tabela)
+            story.append(tv)
+            story.append(Spacer(1, 4))
+
         linhas_ano = [l for l in linhas_ir if l["mes"].startswith(ano)]
         if linhas_ano:
-            story.append(Paragraph("Apuração mensal de Imposto de Renda", subsecao))
-            dados = [["Mês", "Regime", "Result. opções", "Result. ações",
-                      "Prejuízo comp.", "Base cálculo", "Alíquota", "IR devido", "Pago?"]]
+            story.append(Paragraph("Apuração mensal de Imposto de Renda (ações + opções)", subsecao))
+            dados = [["Mês", "Regime", "Result. opções", "Result. ações (exercício)",
+                      "Result. ações (à vista)", "Prejuízo comp.", "Base cálculo", "Alíquota",
+                      "IR devido", "Pago?"]]
             for l in linhas_ano:
                 pago = darfs_pagos.get((l["mes"], l["regime"]))
                 if pago:
@@ -2220,40 +2425,70 @@ def gerar_pdf_relatorio_opcoes(carteira, ops, linhas_ir, darfs_pagos):
                     status_pago = "Não"
                 else:
                     status_pago = "—"
-                if l["isento_acoes"] is None:
-                    col_acoes = "—"
-                elif l["isento_acoes"]:
-                    col_acoes = f"{_fmt_moeda_pdf(l['ganho_acoes_mes'])} (isento)"
+                # exercício de opção NUNCA é isento (isento_acoes sempre False desde a correção
+                # de 2026-11) — só venda à vista normal pode ficar isenta de verdade
+                col_acoes_ex = "—" if l["isento_acoes"] is None else _fmt_moeda_pdf(l["ganho_acoes_mes"])
+                if l.get("isento_vista") is None:
+                    col_acoes_vista = "—"
+                elif l["isento_vista"]:
+                    col_acoes_vista = f"{_fmt_moeda_pdf(l['ganho_vista_mes'])} (isento)"
                 else:
-                    col_acoes = _fmt_moeda_pdf(l["ganho_acoes_mes"])
+                    col_acoes_vista = _fmt_moeda_pdf(l["ganho_vista_mes"])
                 dados.append([
                     _fmt_mes_pdf(l["mes"]), "Comum" if l["regime"] == "comum" else "Day Trade",
-                    _fmt_moeda_pdf(l["resultado_opcoes_mes"]), col_acoes,
+                    _fmt_moeda_pdf(l["resultado_opcoes_mes"]), col_acoes_ex, col_acoes_vista,
                     _fmt_moeda_pdf(l["prejuizo_compensado"]),
                     _fmt_moeda_pdf(l["base"]), f"{l['aliquota'] * 100:.0f}%",
                     _fmt_moeda_pdf(l["devido"]) if l["devido"] else "—", status_pago,
                 ])
             t2 = Table(dados, repeatRows=1,
-                       colWidths=[1.5 * cm, 1.7 * cm, 2 * cm, 2.3 * cm, 2 * cm, 2 * cm,
-                                  1.4 * cm, 1.8 * cm, 2.7 * cm])
+                       colWidths=[1.3 * cm, 1.5 * cm, 1.7 * cm, 2 * cm, 1.9 * cm, 1.7 * cm,
+                                  1.7 * cm, 1.2 * cm, 1.6 * cm, 2.3 * cm])
             t2.setStyle(estilo_tabela)
             story.append(t2)
+
+        linhas_fii_ano = [l for l in linhas_fii if l["mes"].startswith(ano)]
+        if linhas_fii_ano:
+            story.append(Paragraph("Apuração mensal de Imposto de Renda (FII)", subsecao))
+            dados = [["Mês", "Resultado do mês", "Prejuízo comp.", "Base cálculo",
+                      "Alíquota", "IR devido", "Pago?"]]
+            for l in linhas_fii_ano:
+                pago = darfs_pagos.get((l["mes"], "fii"))
+                if pago:
+                    status_pago = "Sim — " + _fmt_data_pdf(pago.data_pagamento)
+                elif l["devido"]:
+                    status_pago = "Não"
+                else:
+                    status_pago = "—"
+                dados.append([
+                    _fmt_mes_pdf(l["mes"]), _fmt_moeda_pdf(l["resultado_mes"]),
+                    _fmt_moeda_pdf(l["prejuizo_compensado"]), _fmt_moeda_pdf(l["base"]),
+                    f"{l['aliquota'] * 100:.0f}%",
+                    _fmt_moeda_pdf(l["devido"]) if l["devido"] else "—", status_pago,
+                ])
+            t3 = Table(dados, repeatRows=1,
+                       colWidths=[1.6 * cm, 2.3 * cm, 2 * cm, 2.1 * cm, 1.6 * cm, 1.9 * cm, 2.7 * cm])
+            t3.setStyle(estilo_tabela)
+            story.append(t3)
         story.append(Spacer(1, 4))
 
     story.append(Paragraph(
-        "Este relatório aplica alíquota de 15% no regime comum e 20% em day trade, com compensação "
-        "de prejuízo dentro do mesmo regime e dispensa de DARF abaixo de R$ 10,00 (valor acumulado "
-        "para o mês seguinte). Quando uma CALL vendida é exercida, o prêmio é somado ao valor de "
-        "venda da ação e apurado no mercado à vista — <b>dentro da mesma apuração mensal do regime "
-        "comum que as opções</b> (uma perda abate a outra, o mesmo mínimo de R$10 vale pra soma dos "
-        "dois) —, podendo ficar isento se as vendas de ações do mês (valor vendido, não o lucro) "
-        "somarem até R$ 20 mil; isenção dispensa o imposto sobre um ganho, mas não apaga um prejuízo, "
-        "que continua sendo compensável. Essa isenção considera só as vendas geradas por exercício "
-        "que este aplicativo conhece — se você também vendeu outras ações no mesmo mês fora daqui, "
-        "some manualmente antes de confiar nisso. Quando uma PUT vendida é exercida, o prêmio reduz "
-        "o custo da ação comprada — não há imposto devido agora, só quando essa ação for vendida no "
-        "futuro (e esse app não acompanha vendas de ações fora de opções). Documento de apoio ao "
-        "controle pessoal, não é documento fiscal oficial: confirme os valores com um contador.",
+        "Este relatório aplica alíquota de 15% no regime comum (ações + opções) e 20% em day "
+        "trade, com compensação de prejuízo dentro do mesmo regime e dispensa de DARF abaixo de "
+        "R$ 10,00 (valor acumulado para o mês seguinte). Quando uma CALL vendida é exercida, o "
+        "prêmio é somado ao valor de venda da ação e apurado no mercado à vista — <b>dentro da "
+        "mesma apuração mensal do regime comum que as opções</b> (uma perda abate a outra, o "
+        "mesmo mínimo de R$10 vale pra soma dos dois) — mas <b>nunca fica isento</b> da isenção de "
+        "R$20 mil/mês, mesmo vendendo pouco (IN RFB 1.585/2015, art. 59 §2º, IV): essa isenção vale "
+        "só pra venda normal no mercado à vista (coluna 'à vista' acima), que fica isenta se as "
+        "vendas do mês somarem até R$20 mil e o resultado for positivo — isenção que dispensa o "
+        "imposto sobre um ganho, mas não apaga um prejuízo, que continua sendo compensável. Quando "
+        "uma PUT vendida é exercida, o prêmio reduz o custo da ação comprada — não há imposto "
+        "devido agora, só quando essa ação for vendida no futuro. <b>FII tem apuração totalmente "
+        "separada</b>: sempre tributado a 20%, nunca tem a isenção de R$20 mil (Lei 11.196/2005, "
+        "art. 3º, XIII), e o prejuízo de FII só compensa prejuízo de FII, nunca ação/opção. "
+        "Documento de apoio ao controle pessoal, não é documento fiscal oficial: confirme os "
+        "valores com um contador.",
         nota))
 
     doc.build(story)
@@ -2398,9 +2633,11 @@ def api_opcoes_relatorio_pdf(cid):
     c = get_carteira_or_404(cid)
     require_owner(c)
     ops = OpcaoOp.query.filter_by(carteira_id=cid).order_by(OpcaoOp.data_abertura, OpcaoOp.id).all()
+    vendas = VendaAtivo.query.filter_by(carteira_id=cid).order_by(VendaAtivo.data_venda, VendaAtivo.id).all()
     darfs_pagos = {(d.mes, d.regime): d for d in DarfPagamento.query.filter_by(carteira_id=cid).all()}
-    linhas_ir = calcular_ir_opcoes(ops, c.prejuizo_inicial_ir or 0)
-    pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, darfs_pagos)
+    linhas_ir = calcular_ir_opcoes(ops, vendas, c.prejuizo_inicial_ir or 0)
+    linhas_fii = calcular_ir_fii(vendas, c.prejuizo_inicial_fii or 0)
+    pdf_bytes = gerar_pdf_relatorio_opcoes(c, ops, linhas_ir, darfs_pagos, vendas, linhas_fii)
     nome_arquivo = f"opcoes_{c.nome}_{datetime.now().strftime('%Y%m%d')}.pdf" \
         .replace(" ", "_").replace("/", "-")
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
@@ -2416,7 +2653,7 @@ def api_darf_marcar(cid):
     d = request.get_json(force=True) or {}
     mes = (d.get("mes") or "").strip()
     regime = d.get("regime")
-    if not mes or regime not in ("comum", "day"):
+    if not mes or regime not in ("comum", "day", "fii"):
         return jsonify({"erro": "informe mês e regime válidos"}), 400
     # mesmo risco de corrida do api_preco_teto_salvar: duas marcações quase simultâneas pro
     # mesmo (carteira_id, mes, regime) podem estourar o UniqueConstraint no commit.
@@ -2858,6 +3095,7 @@ def ensure_schema():
     add("opcao_op", "operacao", "operacao VARCHAR(6) DEFAULT 'venda'")
     add("preco_teto_premissa", "atualizado_em", "atualizado_em TIMESTAMP")
     add("carteira", "prejuizo_inicial_ir", "prejuizo_inicial_ir FLOAT DEFAULT 0")
+    add("carteira", "prejuizo_inicial_fii", "prejuizo_inicial_fii FLOAT DEFAULT 0")
     cols = colunas_de("rent_ativo")
     if cols is not None:
         if "classe" in cols and "is_caixa" in cols:

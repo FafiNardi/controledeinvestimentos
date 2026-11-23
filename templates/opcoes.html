@@ -124,6 +124,15 @@
     font-size:12px;border:1px solid transparent;background:transparent;color:var(--txt)}
   td input:hover,td select:hover{border-color:var(--line)}
   td input:focus,td select:focus{border-color:var(--accent);background:var(--panel2);outline:0}
+  .stepper-wrap{display:flex;align-items:center;gap:2px}
+  .stepper-wrap input{min-width:58px}
+  .stepper-arrows{display:flex;flex-direction:column}
+  .stepper-arrows button{width:16px;height:12px;padding:0;line-height:1;font-size:8px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer}
+  .stepper-arrows button:first-child{border-radius:3px 3px 0 0;border-bottom:0}
+  .stepper-arrows button:last-child{border-radius:0 0 3px 3px}
+  .stepper-arrows button:hover{background:var(--line);color:var(--txt)}
+  .stepper-arrows button:disabled{opacity:.4;cursor:default}
   td.ativo-cell input{text-align:left;font-family:inherit;font-weight:700;min-width:90px}
   .addbar{display:flex;justify-content:flex-end;padding:12px 0 4px}
   .empty-row td{text-align:center;color:var(--muted);padding:20px}
@@ -889,8 +898,8 @@ function renderTabela(){
       <td><input type="date" value="${o.data_abertura||''}" ${dis} onchange="editarCampo(${o.id},'data_abertura',this.value)"></td>
       <td><input type="date" value="${o.data_vencimento||''}" ${dis} onchange="editarCampo(${o.id},'data_vencimento',this.value)" title="Opção europeia: o fechamento sempre acontece nessa data"></td>
       <td>${inputMoeda(o.id,'strike',o.strike,dis)}</td>
-      <td><input type="number" step="1" value="${o.quantidade}" ${dis} onchange="editarCampo(${o.id},'quantidade',this.value)"></td>
-      <td>${inputMoeda(o.id,'premio',o.premio,dis)}</td>
+      <td><input type="number" step="100" value="${o.quantidade}" ${dis} onchange="editarCampo(${o.id},'quantidade',this.value)"></td>
+      <td>${inputMoedaStepper(o.id,'premio',o.premio,dis,0.01)}</td>
       <td>${BRL(premioTotal(o))}</td>
       <td><span class="badge ${o.status}">${rotuloStatus(o.status)}</span></td>
       <td>${inputMoeda(o.id,'custo_recompra',o.custo_recompra,dis, o.status!=='recomprada')}</td>
@@ -915,6 +924,28 @@ function inputMoeda(id, campo, valor, disabled, apagado){
   const estilo = apagado ? 'style="opacity:.4"' : '';
   return `<input type="text" inputmode="decimal" value="${BRL(valor)}" ${dis} ${estilo}
     onfocus="this.select()" onchange="editarCampo(${id},'${campo}',this.value)">`;
+}
+// mesma coisa que inputMoeda, mas com setinhas ▲▼ do lado pra subir/descer em passos fixos
+// (pedido do Rafael pro Prêmio unit.: clicar pra cima soma 0,01, pra baixo subtrai 0,01) —
+// sobe/desce o valor já SALVO (não precisa digitar nem apertar enter) reaproveitando o
+// editarCampo normal, então passa pelo mesmo r.ok/revert de sempre
+function inputMoedaStepper(id, campo, valor, disabled, passo){
+  const dis = disabled ? 'disabled' : '';
+  const dbtn = disabled ? 'disabled' : '';
+  return `<div class="stepper-wrap">
+    <input type="text" inputmode="decimal" value="${BRL(valor)}" ${dis}
+      onfocus="this.select()" onchange="editarCampo(${id},'${campo}',this.value)">
+    <span class="stepper-arrows">
+      <button type="button" ${dbtn} title="+${passo.toLocaleString('pt-BR',{minimumFractionDigits:2})}" onclick="incrementarCampo(${id},'${campo}',${passo})">▲</button>
+      <button type="button" ${dbtn} title="-${passo.toLocaleString('pt-BR',{minimumFractionDigits:2})}" onclick="incrementarCampo(${id},'${campo}',${-passo})">▼</button>
+    </span>
+  </div>`;
+}
+function incrementarCampo(id, campo, delta){
+  const o = (DATA.operacoes||[]).find(x=>x.id===id);
+  if(!o) return;
+  const novo = Math.max(0, Math.round(((o[campo]||0) + delta) * 100) / 100);
+  editarCampo(id, campo, novo);
 }
 // aceita "R$ 12,61", "12,61" ou "12.61" digitado à mão
 function parseMoeda(str){

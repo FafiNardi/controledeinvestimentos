@@ -393,6 +393,26 @@ function fmtData(d){
   const [a,m,dd] = d.split('-');
   return dd+'/'+m+'/'+a;
 }
+// converte AAAA-MM-DD (formato do banco) <-> DD/MM/AAAA (formato que o usuário vê/digita
+// em todo o resto do app) — usado nos prompt() que pedem uma data digitada
+function brParaIso(br){
+  const m = (br||'').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if(!m) return null;
+  const [, d, mo, a] = m;
+  return `${a}-${mo}-${d}`;
+}
+// pede uma data via prompt() em DD/MM/AAAA, com retry em caso de formato inválido —
+// devolve AAAA-MM-DD, '' se deixou em branco, ou null se cancelou de verdade
+function promptDataBR(mensagem, isoDefault){
+  const padraoBR = isoDefault ? fmtData(isoDefault) : '';
+  let entrada = prompt(mensagem, padraoBR);
+  while(entrada!==null && entrada.trim() && !brParaIso(entrada)){
+    entrada = prompt(`Data em formato inválido — use DD/MM/AAAA (ex: ${padraoBR || '23/11/2026'}):`, padraoBR);
+  }
+  if(entrada===null) return null;
+  if(!entrada.trim()) return '';
+  return brParaIso(entrada);
+}
 function parseMoeda(str){
   if(str==null || str==='') return 0;
   let s = String(str).replace(/[^\d,.-]/g,'');
@@ -625,8 +645,8 @@ function renderIRFii(){
 
 async function marcarDarf(mes, regime, valor){
   const hoje = new Date().toISOString().slice(0,10);
-  const data = prompt('Data em que você pagou essa DARF (AAAA-MM-DD):', hoje);
-  if(data===null) return;
+  const data = promptDataBR('Data em que você pagou essa DARF:', hoje);
+  if(!data) return; // null (cancelou) ou '' (deixou em branco) — nos dois casos não tem data válida pra salvar
   await fetch(`/api/carteira/${CID}/darfs`,{method:'POST',headers:{'Content-Type':'application/json'},
     body: JSON.stringify({mes, regime, data_pagamento:data, valor_pago:valor})});
   await load();

@@ -71,6 +71,7 @@
          white-space:nowrap}
   .badge.aberta{background:rgba(245,183,84,.16);color:var(--amber)}
   .badge.po{background:rgba(52,211,153,.16);color:var(--green)}
+  .badge.exercida{background:rgba(91,141,239,.16);color:var(--blue)}
   .group-label{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:700;
                letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
                padding:26px 0 10px}
@@ -151,7 +152,9 @@
     <div class="tbl-scroll">
       <table>
         <thead><tr>
-          <th>Ativo</th><th>Classe</th><th>Data venda</th><th>Qtde</th>
+          <th>Ativo</th><th>Classe</th>
+          <th title="Lançamento manual (venda normal) ou derivado de uma CALL exercida na aba Opções — essas vêm automáticas, não dá pra editar aqui">Origem</th>
+          <th>Data venda</th><th>Qtde</th>
           <th>Valor venda</th><th>Custo total</th><th>Demais custos</th><th>Resultado</th><th>Obs.</th><th></th>
         </tr></thead>
         <tbody id="tbodyVendas"></tbody>
@@ -630,31 +633,64 @@ async function desmarcarDarf(id){
 
 // ------------------------------------------------- vendas à vista (ações/FII, fora de opção)
 
+// Vendas de ação geradas por exercício de CALL (lançadas na aba Opções) — só pra EXIBIR
+// junto das vendas manuais nessa tabela, numa visão única de "tudo que foi vendido". Não
+// editável aqui (edita na origem, aba Opções) e não entra em DATA.vendas nem em nenhum
+// cálculo novo — o IR dessas já é calculado à parte, incluindo o prêmio, por
+// calcularIRAcoesExercicio(); aqui mostra só o lado "ação" (sem o prêmio) pra não duplicar
+// nem conflitar com a coluna "Resultado ações (exercício)" da apuração mensal abaixo.
+function vendasExercicioDerivadas(){
+  return (DATA.operacoes||[])
+    .filter(o=>o.tipo==='CALL' && o.status==='exercida' && o.preco_medio)
+    .map(o=>({
+      id: 'ex-'+o.id, origem: 'exercicio', ticker: o.ativo, classe: 'acao',
+      data_venda: o.data_fechamento || o.data_vencimento,
+      quantidade: o.quantidade, valor_venda: (o.strike||0)*(o.quantidade||0),
+      custo_total: (o.preco_medio||0)*(o.quantidade||0), demais_custos: o.custo_exercicio||0,
+      obs: `Exercício de opção (prêmio de ${BRL(o.premio*o.quantidade)} à parte, já contado na apuração de IR)`,
+    }));
+}
+
 function renderVendas(){
   const filtroClasse = document.getElementById('filtroClasseVenda').value;
-  const vendas = (DATA.vendas||[]).filter(v=>!filtroClasse || (v.classe||'acao')===filtroClasse);
+  const manuais = (DATA.vendas||[]).map(v=>({...v, origem:'manual'}));
+  const exercicio = vendasExercicioDerivadas();
+  const vendas = manuais.concat(exercicio).filter(v=>!filtroClasse || (v.classe||'acao')===filtroClasse);
   const tb = document.getElementById('tbodyVendas');
   if(!vendas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="10">${(DATA.vendas||[]).length ? 'Nenhuma venda nessa classe.' : 'Nenhuma venda lançada ainda.'}</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="11">${(DATA.vendas||[]).length || exercicio.length ? 'Nenhuma venda nessa classe.' : 'Nenhuma venda lançada ainda.'}</td></tr>`;
     return;
   }
-  const dis = EDIT ? '' : 'disabled';
   tb.innerHTML = vendas.slice().sort((a,b)=>(b.data_venda||'').localeCompare(a.data_venda||'')).map(v=>{
+    const ehManual = v.origem==='manual';
+    const dis = (EDIT && ehManual) ? '' : 'disabled';
     const resultado = (v.valor_venda||0) - (v.custo_total||0) - (v.demais_custos||0);
-    return `<tr>
-      <td class="ativo-cell"><input value="${v.ticker}" ${dis} onchange="editarCampoVenda(${v.id},'ticker',this.value)"></td>
-      <td><select ${dis} onchange="editarCampoVenda(${v.id},'classe',this.value)">
+    const origemHtml = ehManual
+      ? '<span class="muted">Manual</span>'
+      : '<span class="badge exercida" title="Lançada na aba Opções — edite por lá">Exercício</span>';
+    return `<tr${ehManual?'':' style="opacity:.8"'}>
+      <td class="ativo-cell">${ehManual
+        ? `<input value="${v.ticker}" ${dis} onchange="editarCampoVenda(${v.id},'ticker',this.value)">`
+        : `<span>${v.ticker}</span>`}</td>
+      <td>${ehManual ? `<select ${dis} onchange="editarCampoVenda(${v.id},'classe',this.value)">
             <option value="acao" ${v.classe==='acao'?'selected':''}>Ação</option>
             <option value="fii" ${v.classe==='fii'?'selected':''}>FII</option>
-          </select></td>
-      <td><input type="date" value="${v.data_venda||''}" ${dis} onchange="editarCampoVenda(${v.id},'data_venda',this.value)"></td>
-      <td><input type="number" step="1" value="${v.quantidade}" ${dis} onchange="editarCampoVenda(${v.id},'quantidade',this.value)"></td>
-      <td>${inputMoedaVenda(v.id,'valor_venda',v.valor_venda,dis)}</td>
-      <td>${inputMoedaVenda(v.id,'custo_total',v.custo_total,dis)}</td>
-      <td>${inputMoedaVenda(v.id,'demais_custos',v.demais_custos,dis)}</td>
+          </select>` : '<span>Ação</span>'}</td>
+      <td>${origemHtml}</td>
+      <td>${ehManual
+        ? `<input type="date" value="${v.data_venda||''}" ${dis} onchange="editarCampoVenda(${v.id},'data_venda',this.value)">`
+        : `<span>${v.data_venda||'—'}</span>`}</td>
+      <td>${ehManual
+        ? `<input type="number" step="1" value="${v.quantidade}" ${dis} onchange="editarCampoVenda(${v.id},'quantidade',this.value)">`
+        : `<span>${v.quantidade}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'valor_venda',v.valor_venda,dis) : `<span>${BRL(v.valor_venda)}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'custo_total',v.custo_total,dis) : `<span>${BRL(v.custo_total)}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'demais_custos',v.demais_custos,dis) : `<span>${BRL(v.demais_custos)}</span>`}</td>
       <td class="${resultado>=0?'pos':'neg'}">${BRL(resultado)}</td>
-      <td class="ativo-cell"><input value="${(v.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampoVenda(${v.id},'obs',this.value)"></td>
-      <td class="acoes-cell">${EDIT ? `<button class="mini ghost" title="Excluir" onclick="excluirVenda(${v.id})">🗑</button>` : ''}</td>
+      <td class="ativo-cell">${ehManual
+        ? `<input value="${(v.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampoVenda(${v.id},'obs',this.value)">`
+        : `<span class="muted" title="${v.obs}" style="font-size:11px">${v.obs}</span>`}</td>
+      <td class="acoes-cell">${(EDIT && ehManual) ? `<button class="mini ghost" title="Excluir" onclick="excluirVenda(${v.id})">🗑</button>` : ''}</td>
     </tr>`;
   }).join('');
 }

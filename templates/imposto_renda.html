@@ -91,6 +91,12 @@
   td input:hover,td select:hover{border-color:var(--line)}
   td input:focus,td select:focus{border-color:var(--accent);background:var(--panel2);outline:0}
   td.ativo-cell input{text-align:left;font-family:inherit;font-weight:700;min-width:90px}
+  /* linhas de venda por exercício não têm input/select (campos travados) — sem isso, o texto
+     solto ficava com padding/altura diferente das outras linhas (que têm caixa de input),
+     dando a impressão de coluna desalinhada */
+  .ro-cell{display:block;width:100%;min-width:78px;text-align:center;padding:5px;
+    border:1px solid transparent;box-sizing:border-box}
+  td.ativo-cell .ro-cell{text-align:left;font-weight:700;min-width:90px}
   .empty-row td{text-align:center;color:var(--muted);padding:20px}
   .filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 0 4px}
   .acoes-cell{display:flex;gap:4px;justify-content:flex-end}
@@ -671,25 +677,25 @@ function renderVendas(){
     return `<tr${ehManual?'':' style="opacity:.8"'}>
       <td class="ativo-cell">${ehManual
         ? `<input value="${v.ticker}" ${dis} onchange="editarCampoVenda(${v.id},'ticker',this.value)">`
-        : `<span>${v.ticker}</span>`}</td>
+        : `<span class="ro-cell">${v.ticker}</span>`}</td>
       <td>${ehManual ? `<select ${dis} onchange="editarCampoVenda(${v.id},'classe',this.value)">
             <option value="acao" ${v.classe==='acao'?'selected':''}>Ação</option>
             <option value="fii" ${v.classe==='fii'?'selected':''}>FII</option>
-          </select>` : '<span>Ação</span>'}</td>
+          </select>` : '<span class="ro-cell">Ação</span>'}</td>
       <td>${origemHtml}</td>
       <td>${ehManual
         ? `<input type="date" value="${v.data_venda||''}" ${dis} onchange="editarCampoVenda(${v.id},'data_venda',this.value)">`
-        : `<span>${v.data_venda||'—'}</span>`}</td>
+        : `<span class="ro-cell">${v.data_venda?fmtData(v.data_venda):'—'}</span>`}</td>
       <td>${ehManual
         ? `<input type="number" step="1" value="${v.quantidade}" ${dis} onchange="editarCampoVenda(${v.id},'quantidade',this.value)">`
-        : `<span>${v.quantidade}</span>`}</td>
-      <td>${ehManual ? inputMoedaVenda(v.id,'valor_venda',v.valor_venda,dis) : `<span>${BRL(v.valor_venda)}</span>`}</td>
-      <td>${ehManual ? inputMoedaVenda(v.id,'custo_total',v.custo_total,dis) : `<span>${BRL(v.custo_total)}</span>`}</td>
-      <td>${ehManual ? inputMoedaVenda(v.id,'demais_custos',v.demais_custos,dis) : `<span>${BRL(v.demais_custos)}</span>`}</td>
+        : `<span class="ro-cell">${v.quantidade}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'valor_venda',v.valor_venda,dis) : `<span class="ro-cell">${BRL(v.valor_venda)}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'custo_total',v.custo_total,dis) : `<span class="ro-cell">${BRL(v.custo_total)}</span>`}</td>
+      <td>${ehManual ? inputMoedaVenda(v.id,'demais_custos',v.demais_custos,dis) : `<span class="ro-cell">${BRL(v.demais_custos)}</span>`}</td>
       <td class="${resultado>=0?'pos':'neg'}">${BRL(resultado)}</td>
       <td class="ativo-cell">${ehManual
         ? `<input value="${(v.obs||'').replace(/"/g,'&quot;')}" ${dis} placeholder="—" onchange="editarCampoVenda(${v.id},'obs',this.value)">`
-        : `<span class="muted" title="${v.obs}" style="font-size:11px">${v.obs}</span>`}</td>
+        : `<span class="ro-cell muted" title="${v.obs}" style="font-size:11px;text-align:left">${v.obs}</span>`}</td>
       <td class="acoes-cell">${(EDIT && ehManual) ? `<button class="mini ghost" title="Excluir" onclick="excluirVenda(${v.id})">🗑</button>` : ''}</td>
     </tr>`;
   }).join('');

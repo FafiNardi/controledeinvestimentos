@@ -2701,6 +2701,134 @@ def api_darf_desmarcar(did):
     return jsonify({"ok": True})
 
 
+def ultimo_dia_util(ano, mes):
+    """Último dia útil (seg-sex) do mês — não desconta feriados nacionais, só fins de
+    semana, então em meses com feriado no finalzinho o vencimento real pode ser 1 dia
+    antes do calculado aqui."""
+    if mes == 12:
+        d = datetime(ano + 1, 1, 1) - timedelta(days=1)
+    else:
+        d = datetime(ano, mes + 1, 1) - timedelta(days=1)
+    while d.weekday() >= 5:  # 5=sábado, 6=domingo
+        d -= timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+def vencimento_darf(mes_apuracao):
+    """DARF de renda variável vence no último dia útil do mês SEGUINTE ao da apuração
+    (ex.: apuração de fevereiro vence no último dia útil de março)."""
+    ano, mes = (int(x) for x in mes_apuracao.split("-"))
+    mes += 1
+    if mes > 12:
+        mes = 1
+        ano += 1
+    return ultimo_dia_util(ano, mes)
+
+
+def multa_mora_darf(valor, vencimento_iso, ate_iso):
+    """Multa de mora: 0,33% por dia de atraso, limitada a 20% (art. 61 da Lei 9.430/96).
+    Conta a partir do dia seguinte ao vencimento até a data de pagamento (ou hoje, se
+    ainda não paga)."""
+    venc = datetime.strptime(vencimento_iso, "%Y-%m-%d")
+    ate = datetime.strptime(ate_iso, "%Y-%m-%d")
+    dias = (ate - venc).days
+    if dias <= 0:
+        return 0, 0.0
+    pct = min(dias * 0.33, 20.0)
+    return dias, round(valor * pct / 100, 2)
+
+
+_SELIC_CACHE = {}
+
+
+def selic_acumulada(vencimento_iso, ate_iso):
+    """Juros = Selic acumulada mês a mês, do mês seguinte ao do vencimento até o mês
+    anterior ao do pagamento, mais 1% no mês do pagamento (padrão Receita Federal pra
+    DARF em atraso). Busca a série mensal 4390 (Selic acumulada no mês) do Banco Central;
+    se a API não responder, devolve None em vez de arriscar um número errado."""
+    venc = datetime.strptime(vencimento_iso, "%Y-%m-%d")
+    ate = datetime.strptime(ate_iso, "%Y-%m-%d")
+    if ate <= venc:
+        return 0.0
+    meses_necessarios = []
+    y, m = venc.year, venc.month
+    m += 1
+    if m > 12:
+        m = 1
+        y += 1
+    while (y, m) < (ate.year, ate.month):
+        meses_necessarios.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    total_pct = 1.0  # 1% no mês do pagamento, sempre
+    if meses_necessarios:
+        ini = datetime(meses_necessarios[0][0], meses_necessarios[0][1], 1)
+        fim_ano, fim_mes = meses_necessarios[-1]
+        if fim_mes == 12:
+            fim = datetime(fim_ano, 12, 31)
+        else:
+            fim = datetime(fim_ano, fim_mes + 1, 1) - timedelta(days=1)
+        cache_key = (ini.strftime("%Y-%m"), fim.strftime("%Y-%m"))
+        if cache_key in _SELIC_CACHE:
+            dados = _SELIC_CACHE[cache_key]
+        else:
+            try:
+                url = (
+                    "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados"
+                    f"?formato=json&dataInicial={ini.strftime('%d/%m/%Y')}"
+                    f"&dataFinal={fim.strftime('%d/%m/%Y')}"
+                )
+                r = requests.get(url, timeout=6)
+                r.raise_for_status()
+                dados = r.json()
+                _SELIC_CACHE[cache_key] = dados
+            except Exception:
+                return None
+        por_mes = {}
+        for item in dados:
+            dt = datetime.strptime(item["data"], "%d/%m/%Y")
+            por_mes[(dt.year, dt.month)] = float(item["valor"])
+        for chave in meses_necessarios:
+            if chave not in por_mes:
+                return None
+            total_pct += por_mes[chave]
+    return round(total_pct, 4)
+
+
+@app.route("/api/darf/encargos")
+@login_required
+def api_darf_encargos():
+    """Calcula multa de mora + juros Selic de uma DARF em atraso (ou simulação até hoje,
+    se ainda não paga). Código do DARF pra renda variável de pessoa física (ações,
+    opções e FII) é sempre o 6015."""
+    try:
+        valor = float(request.args.get("valor") or 0)
+        vencimento = request.args.get("vencimento")
+        ate = request.args.get("ate") or datetime.now().strftime("%Y-%m-%d")
+        datetime.strptime(vencimento, "%Y-%m-%d")
+        datetime.strptime(ate, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return jsonify({"erro": "parâmetros inválidos"}), 400
+    dias_atraso, multa = multa_mora_darf(valor, vencimento, ate)
+    if dias_atraso <= 0:
+        juros_pct, juros = 0.0, 0.0
+    else:
+        juros_pct = selic_acumulada(vencimento, ate)
+        juros = round(valor * juros_pct / 100, 2) if juros_pct is not None else None
+    total = round(valor + multa + juros, 2) if juros is not None else None
+    return jsonify({
+        "codigo": "6015",
+        "dias_atraso": dias_atraso,
+        "multa_pct": round(min(dias_atraso * 0.33, 20.0), 2) if dias_atraso > 0 else 0,
+        "multa_valor": multa,
+        "juros_pct": juros_pct,
+        "juros_valor": juros,
+        "total": total,
+    })
+
+
 # --------------------------------------------------------------------------- #
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #

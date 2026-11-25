@@ -223,7 +223,9 @@
           <th>Prejuízo compensado</th>
           <th>Base de cálculo</th><th>Alíquota</th><th>IR calculado</th>
           <th title="Valor que ainda não bateu R$10 — não precisa pagar agora, some com o próximo mês">Acumulado (&lt; R$10)</th>
-          <th>IR devido (DARF)</th><th>Pagamento</th>
+          <th>IR devido (DARF)</th>
+          <th title="Código 6015 — Ganhos líquidos em operações em bolsa de valores, mercadorias, futuros e assemelhados (vale pra ações, opções e FII). Último dia útil do mês seguinte ao da apuração.">Vencimento</th>
+          <th>Pagamento</th>
         </tr></thead>
         <tbody id="tbodyIR"></tbody>
       </table>
@@ -248,7 +250,9 @@
       <table>
         <thead><tr>
           <th>Mês</th><th>Resultado do mês</th><th>Prejuízo compensado</th>
-          <th>Base de cálculo</th><th>IR calculado</th><th>IR devido (DARF)</th><th>Pagamento</th>
+          <th>Base de cálculo</th><th>IR calculado</th><th>IR devido (DARF)</th>
+          <th title="Código 6015 — Ganhos líquidos em operações em bolsa de valores, mercadorias, futuros e assemelhados. Último dia útil do mês seguinte ao da apuração.">Vencimento</th>
+          <th>Pagamento</th>
         </tr></thead>
         <tbody id="tbodyIRFii"></tbody>
       </table>
@@ -412,6 +416,33 @@ function promptDataBR(mensagem, isoDefault){
   if(entrada===null) return null;
   if(!entrada.trim()) return '';
   return brParaIso(entrada);
+}
+// Vencimento da DARF de renda variável: último dia útil do mês SEGUINTE ao da apuração.
+// Não desconta feriado nacional, só fim de semana (mesma simplificação do backend).
+function ultimoDiaUtil(ano, mes){
+  let d = mes===12 ? new Date(ano+1,0,1) : new Date(ano,mes,1);
+  d.setDate(d.getDate()-1);
+  while(d.getDay()===0 || d.getDay()===6) d.setDate(d.getDate()-1);
+  return d;
+}
+function vencimentoDarf(mesApuracao){
+  let [ano, mes] = mesApuracao.split('-').map(Number);
+  mes += 1;
+  if(mes>12){ mes=1; ano+=1; }
+  const d = ultimoDiaUtil(ano, mes);
+  return d.toISOString().slice(0,10);
+}
+function hojeIso(){ return new Date().toISOString().slice(0,10); }
+const _cacheEncargos = {};
+async function buscarEncargos(valor, vencimento, ate){
+  const key = `${valor}|${vencimento}|${ate}`;
+  if(_cacheEncargos[key]) return _cacheEncargos[key];
+  try{
+    const r = await fetch(`/api/darf/encargos?valor=${valor}&vencimento=${vencimento}&ate=${ate}`);
+    const j = await r.json();
+    _cacheEncargos[key] = j;
+    return j;
+  }catch(e){ return null; }
 }
 function parseMoeda(str){
   if(str==null || str==='') return 0;
@@ -590,11 +621,44 @@ function statusDarfHtml(mes, regime, devido){
     : `<span class="badge aberta">Pendente</span>`;
 }
 
+// Vencimento da DARF (código 6015) + aviso de atraso; se atrasada, o <span> de encargos
+// fica com um id fixo que preencherEncargos() busca e preenche via /api/darf/encargos
+// depois do innerHTML já estar na tela (evita travar o render numa chamada de rede).
+function vencimentoHtml(mes, regime, devido){
+  if(!(devido>0)) return '<span class="muted">—</span>';
+  const venc = vencimentoDarf(mes);
+  const pago = (DATA.darfs||[]).find(d=>d.mes===mes && d.regime===regime);
+  const refData = pago ? pago.data_pagamento : hojeIso();
+  const atrasada = refData > venc;
+  if(!atrasada) return `${fmtData(venc)}` + (!pago ? `<br><span class="muted" style="font-size:10px">a vencer</span>` : '');
+  const spanId = `encargos-${regime}-${mes}`;
+  return `${fmtData(venc)} <span class="badge aberta" style="font-size:10px" title="Multa de mora (0,33%/dia, até 20%) + juros Selic desde o vencimento">atraso</span>`
+    + `<br><span id="${spanId}" class="muted" style="font-size:11px">calculando encargos…</span>`;
+}
+
+async function preencherEncargos(linhas, regimeFixo){
+  for(const l of linhas){
+    const regime = regimeFixo || l.regime;
+    if(!(l.devido>0)) continue;
+    const venc = vencimentoDarf(l.mes);
+    const pago = (DATA.darfs||[]).find(d=>d.mes===l.mes && d.regime===regime);
+    const refData = pago ? pago.data_pagamento : hojeIso();
+    if(refData <= venc) continue;
+    const span = document.getElementById(`encargos-${regime}-${l.mes}`);
+    if(!span) continue;
+    const enc = await buscarEncargos(l.devido, venc, refData);
+    if(!enc){ span.textContent = 'não foi possível calcular os encargos'; continue; }
+    if(enc.total==null){ span.textContent = `${enc.dias_atraso}d de atraso (juros Selic indisponível no momento)`; continue; }
+    span.innerHTML = `${enc.dias_atraso}d · multa ${BRL(enc.multa_valor)} + juros ${BRL(enc.juros_valor)} = `
+      + `<b>${pago ? 'deveria ter pago' : 'pagar hoje'} ${BRL(enc.total)}</b>`;
+  }
+}
+
 function renderIR(){
   const linhas = calcularIR();
   const tb = document.getElementById('tbodyIR');
   if(!linhas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhuma operação encerrada ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="13">Nenhuma operação encerrada ainda.</td></tr>`;
     return;
   }
   tb.innerHTML = linhas.map(l=>{
@@ -619,9 +683,11 @@ function renderIR(){
       <td>${BRL(l.irCalculado)}</td>
       <td class="muted">${(l.devido===0 && (l.irCalculado>0 || l.irPendenteAnterior>0)) ? 'aguardando: '+BRL(l.irCalculado+l.irPendenteAnterior) : '—'}</td>
       <td><b>${BRL(l.devido)}</b></td>
+      <td style="font-size:12px">${vencimentoHtml(l.mes, l.regime, l.devido)}</td>
       <td>${statusDarfHtml(l.mes, l.regime, l.devido)}</td>
     </tr>`;
   }).join('');
+  preencherEncargos(linhas);
 }
 
 function renderIRFii(){
@@ -629,7 +695,7 @@ function renderIRFii(){
   const tb = document.getElementById('tbodyIRFii');
   if(!tb) return;
   if(!linhas.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="7">Nenhuma venda de FII lançada ainda.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="8">Nenhuma venda de FII lançada ainda.</td></tr>`;
     return;
   }
   tb.innerHTML = linhas.map(l=>`<tr>
@@ -639,8 +705,10 @@ function renderIRFii(){
       <td class="${l.base>=0?'pos':'neg'}">${BRL(l.base)}</td>
       <td>${BRL(l.irCalculado)}</td>
       <td><b>${BRL(l.devido)}</b></td>
+      <td style="font-size:12px">${vencimentoHtml(l.mes, 'fii', l.devido)}</td>
       <td>${statusDarfHtml(l.mes, 'fii', l.devido)}</td>
     </tr>`).join('');
+  preencherEncargos(linhas, 'fii');
 }
 
 async function marcarDarf(mes, regime, valor){

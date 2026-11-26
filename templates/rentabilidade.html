@@ -1255,6 +1255,83 @@ async function salvarNovaOrdem(){
   await load();
 }
 
+// ---------------------------------------------------------------- TIR da carteira
+// TIR (taxa interna de retorno) anualizada da carteira como um todo, pelo método do fluxo
+// de caixa (XIRR): diferente do "Acumulado" (TWR, que capitaliza cada mês com peso igual,
+// não importa quanto dinheiro estava investido nele), a TIR dá o peso certo pra cada aporte
+// considerando quanto e QUANDO entrou — é a conta que realmente responde "qual foi o retorno
+// do meu dinheiro", e é a mesma ideia usada no vídeo do Léo (Investidor Sardinha) pra cobrar
+// a TIR de um FII em vez de só olhar o yield.
+//
+// Fluxo de caixa de cada mês = -aportes + resgates + dividendos + aluguel (o que o investidor
+// de fato colocou ou tirou do próprio bolso). A primeira vez que um ativo aparece com saldo
+// inicial (valor_base, sem aporte lançado) esse saldo também conta como dinheiro que "entrou"
+// nesse mês — é a única forma de contabilizar capital que já estava aplicado antes de o ativo
+// começar a ser acompanhado no app (não existe aporte lançado pra ele). O último mês do
+// período recebe ainda o patrimônio final, como se a carteira fosse resgatada por completo
+// hoje — sem isso não dá pra saber quanto esse dinheiro "vale" agora.
+function diasEntreDatas(a, b){ return (b - a) / 86400000; }
+// dia 15 como convenção de "data" de cada mês: os lançamentos acontecem ao longo do mês
+// inteiro, então nem o dia 1 nem o último dia representam bem quando o dinheiro de fato
+// mudou de mãos — o meio do mês é o meio-termo mais neutro
+function dataDoFluxo(f){ return new Date(f.ano, f.mes-1, 15); }
+function npvXirr(r, fluxos, data0){
+  let soma = 0;
+  for(const f of fluxos){
+    const dias = diasEntreDatas(data0, dataDoFluxo(f));
+    soma += f.valor / Math.pow(1+r, dias/365);
+  }
+  return soma;
+}
+// bisseção em vez de Newton-Raphson: mais lento, mas não diverge com fluxos de caixa fora do
+// padrão (muitos resgates intercalados, por exemplo) — procura uma troca de sinal numa grade
+// ampla antes de refinar, e devolve null se não achar nenhuma (mesma cautela do cálculo de
+// juros Selic do DARF: sem dado confiável, mostra "—" em vez de arriscar um número errado)
+function resolverXirr(fluxos){
+  if(fluxos.length < 2) return null;
+  const data0 = dataDoFluxo(fluxos[0]);
+  let lo = null, hi = null, fLo = null, fHi = null;
+  for(let r = -0.99; r < 10; r += 0.05){
+    const a = npvXirr(r, fluxos, data0), b = npvXirr(r+0.05, fluxos, data0);
+    if(isFinite(a) && isFinite(b) && a*b <= 0){ lo=r; hi=r+0.05; fLo=a; fHi=b; break; }
+  }
+  if(lo==null) return null;
+  for(let i=0;i<100;i++){
+    const mid = (lo+hi)/2, fMid = npvXirr(mid, fluxos, data0);
+    if(Math.abs(fMid) < 1e-6) return mid;
+    if(fLo*fMid <= 0){ hi=mid; fHi=fMid; } else { lo=mid; fLo=fMid; }
+  }
+  return (lo+hi)/2;
+}
+function calcularTirCarteira(ateChave){
+  const chaves = Object.keys(DATA.meses).filter(k=>k<=ateChave).sort();
+  if(!chaves.length) return null;
+  const primeiraAparicao = new Set();
+  const fluxos = [];
+  chaves.forEach(k=>{
+    const m = DATA.meses[k];
+    if(!m.tem_dado) return;  // mês sem nenhum lançamento -> sem fluxo de caixa nesse mês
+    let cf = -(m.aportes||0) + (m.resgates||0) + (m.dividendos||0) + (m.aluguel||0);
+    (m.linhas||[]).forEach(l=>{
+      if(l.tem_mov && !primeiraAparicao.has(l.ativo_id)){
+        primeiraAparicao.add(l.ativo_id);
+        if(l.base) cf -= l.base;
+      }
+    });
+    fluxos.push({ano:m.ano, mes:m.mes, valor:cf});
+  });
+  if(!fluxos.length) return null;
+  const ultimaChave = chaves[chaves.length-1];
+  const ultimoMes = DATA.meses[ultimaChave];
+  const ultimoFluxo = fluxos[fluxos.length-1];
+  if(ultimoFluxo.ano===ultimoMes.ano && ultimoFluxo.mes===ultimoMes.mes){
+    ultimoFluxo.valor += ultimoMes.patrimonio||0;
+  } else {
+    fluxos.push({ano:ultimoMes.ano, mes:ultimoMes.mes, valor:ultimoMes.patrimonio||0});
+  }
+  return resolverXirr(fluxos);
+}
+
 function renderStats(){
   const md = mesData(ANO,MES);
   // tudo aqui é acumulado desde o início da carteira até o mês/ano que está sendo navegado —
@@ -1270,12 +1347,14 @@ function renderStats(){
   const dividendosAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.dividendos||0),0);
   const geracaoAteAqui = mesesAteAqui.reduce((s,m)=>s+(m.geracao_total||0),0);
   const rotulo = `${MESES[MES-1]}/${ANO}`;
+  const tir = calcularTirCarteira(chaveAtual);
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="k">Patrimônio (${rotulo})</div><div class="v">${md?BRL(md.patrimonio):'—'}</div></div>
     <div class="stat"><div class="k">Retorno no mês</div><div class="v ${md?classePct(md.rent):''}">${md?PCT(md.rent):'—'}</div></div>
     <div class="stat"><div class="k">Dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.dividendos):'—'}</div></div>
     <div class="stat"><div class="k">Ger. caixa + dividendos (${rotulo})</div><div class="v" style="color:var(--accent)">${md?BRL(md.geracao_total):'—'}</div></div>
     <div class="stat"><div class="k">Acumulado até ${rotulo}</div><div class="v ${md?classePct(md.acumulado):''}">${md&&md.acumulado!=null?PCT(md.acumulado):'—'}</div></div>
+    <div class="stat" title="Taxa interna de retorno anualizada (XIRR): pesa cada aporte pelo quanto e quando entrou, diferente do Acumulado (TWR), que capitaliza cada mês igual, não importa o valor investido nele. Assume que o saldo inicial de cada ativo, na primeira vez que ele aparece, foi investido naquele mês — mesmo que o dinheiro já estivesse aplicado antes de o ativo passar a ser acompanhado no app."><div class="k">TIR anualizada até ${rotulo}</div><div class="v ${classePct(tir)}">${tir!=null?PCT(tir):'—'}</div></div>
     <div class="stat"><div class="k">Ger. caixa + proventos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(geracaoAteAqui)}</div></div>
     <div class="stat"><div class="k">Valor Investido até ${rotulo}</div><div class="v">${BRL(investidoAteAqui)}</div></div>
     <div class="stat"><div class="k">Dividendos Recebidos até ${rotulo}</div><div class="v" style="color:var(--accent)">${BRL(dividendosAteAqui)}</div></div>

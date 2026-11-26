@@ -84,7 +84,7 @@
      text-transform:uppercase;letter-spacing:.04em}
   th.grp-bazin{color:var(--green)} th.grp-barsi{color:var(--gold)} th.grp-fluxo{color:var(--blue)}
   th.grp-cresc5{color:var(--red)} th.grp-graham{color:var(--purple)}
-  th.grp-patrimonial{color:var(--cyan)}
+  th.grp-patrimonial{color:var(--cyan)} th.grp-ipca{color:var(--amber)}
   td:first-child,th:first-child{text-align:left}
   tbody tr:last-child td{border-bottom:0}
   tr:hover td{background:var(--panel2)}
@@ -106,6 +106,7 @@
   .view-tab[data-metodo="cresc5"].on{background:var(--red)}
   .view-tab[data-metodo="graham"].on{background:var(--purple)}
   .view-tab[data-metodo="patrimonial"].on{background:var(--cyan)}
+  .view-tab[data-metodo="ipca_fii"].on{background:var(--amber)}
   .resumo-teto{font-weight:700}
   .resumo-teto.melhor{text-decoration:underline;text-underline-offset:3px}
   tr.linha-editando td{background:rgba(91,141,239,.1)}
@@ -201,6 +202,7 @@
           <th class="grp-fluxo">Teto Fluxo Desc.</th><th class="grp-cresc5">Teto Cresc. Hist.</th>
           <th class="grp-graham">Teto Graham</th>
           <th class="grp-patrimonial">Teto Patrim.</th>
+          <th class="grp-ipca">Teto IPCA+ (FII)</th>
           <th class="sortable" onclick="ordenarResumo('melhor')">Melhor teto <span class="arr" id="arrMelhor"></span></th>
           <th class="sortable" onclick="ordenarResumo('dist')">Distância <span class="arr" id="arrDist"></span></th><th></th>
         </tr></thead>
@@ -375,6 +377,34 @@ function tetoPatrimonial(dados, classe, segmento){
   const fatorAgio = dados.fator_agio != null ? dados.fator_agio : fatorAgioPadrao(classe, segmento);
   return vpa * fatorAgio;
 }
+// Método "IPCA+ (FII)" — Gordon ajustado com NTN-B como benchmark, do jeito que o Léo
+// (Investidor Sardinha) ensina num vídeo: em vez de ações/opções, o benchmark de FII é o
+// título público mais curto possível (ele paga a inflação de volta no aluguel, igual o FII
+// repassa no aluguel dos imóveis — por isso dá pra comparar os dois numa mesma base real).
+// 1) taxa nominal da NTN-B pela fórmula de Fisher: (1+taxa real)×(1+IPCA 12m) - 1
+// 2) taxa exigida: como o título é tributado (IR no resgate) e o dividendo de FII é isento,
+//    a taxa nominal é líquida de IR antes de somar o prêmio de risco (senão a comparação
+//    não é justa — um lado paga imposto, o outro não)
+// 3) projeta o valor patrimonial crescendo pela inflação (reajuste dos aluguéis) e soma os
+//    dividendos dos próximos N anos (constantes, sem crescimento — simplificação didática)
+// 4) acha o preço que, pago hoje, faz esse total futuro render exatamente a taxa exigida
+function tetoIpcaFii(dados){
+  const vpa = dados.vpa || 0;
+  const anos = dados.anos || 0;
+  if(vpa <= 0 || anos <= 0) return null;
+  const taxaReal = dados.taxa_real || 0;
+  const ipca = dados.ipca_12m || 0;
+  const dividendoAnual = dados.dividendo_anual || 0;
+  const premio = dados.premio_risco != null ? dados.premio_risco : 1;
+  const ir = dados.ir_resgate != null ? dados.ir_resgate : 15;
+  const taxaNominal = (1 + taxaReal/100) * (1 + ipca/100) - 1;
+  const taxaExigida = taxaNominal * (1 - ir/100) + premio/100;
+  if(taxaExigida <= 0) return null;
+  const vpaFuturo = vpa * Math.pow(1 + ipca/100, anos);
+  const somaDividendos = dividendoAnual * anos;
+  const valorFuturo = vpaFuturo + somaDividendos;
+  return valorFuturo / Math.pow(1 + taxaExigida, anos);
+}
 function distancia(teto, precoAtual){
   if(teto==null || !precoAtual) return null;
   return (teto - precoAtual) / precoAtual * 100;
@@ -387,6 +417,7 @@ const METODOS_INFO = {
   cresc5: {nome:'Crescimento Histórico', cor:'red', desc:'Projeta o dividendo do próximo ano crescendo na mesma taxa média do lucro dos últimos 5 anos, e acha o preço que faria esse dividendo render o yield mínimo. O crescimento do ROE e a consistência de dividendos aparecem só como informação de qualidade.'},
   graham: {nome:'Graham', cor:'purple', desc:'Preço justo de Benjamin Graham: raiz quadrada de 22,5 × LPA × VPA (15x lucro, 1,5x patrimônio — os limites máximos que Graham aceitava pagar). Só funciona com lucro e patrimônio líquido positivos.'},
   patrimonial: {nome:'Teto Patrimonial', cor:'cyan', desc:'Pensado pra FII de tijolo: nunca pagar ágio sobre o valor patrimonial da cota (o VPA já reflete o laudo de avaliação dos imóveis). Teto = VPA × fator de ágio máximo (padrão 1,0x).'},
+  ipca_fii: {nome:'IPCA+ (FII)', cor:'amber', desc:'Gordon ajustado com a NTN-B mais curta como benchmark: projeta o valor patrimonial crescendo pela inflação + os dividendos dos próximos N anos (prazo do título), e acha o preço que faria esse total render a mesma taxa exigida da NTN-B (líquida de IR, já que o dividendo de FII é isento) mais um prêmio de risco.'},
 };
 let ATIVO_EDITANDO = null;   // id do asset selecionado no editor
 let METODO_EDITANDO = 'bazin';
@@ -429,6 +460,14 @@ function botaoBuscarMacro(a){
     <span id="statusMacro${a.id}"></span>
   </p>`;
 }
+function botaoBuscarMacroIpca(a){
+  if(!EDIT) return '';
+  return `<p class="muted" style="font-size:12px;margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <button class="mini ghost" title="Busca a NTN-B (Tesouro IPCA+) de vencimento mais curto e o IPCA realizado dos últimos 12 meses (Banco Central) — pode demorar até ~30s na primeira busca do dia, depois fica em cache"
+      onclick="buscarMacroIpcaFii(${a.id})">🔄 Buscar NTN-B curta + IPCA</button>
+    <span id="statusMacroIpca${a.id}"></span>
+  </p>`;
+}
 
 // idade das premissas: meses desde a última vez que o método foi salvo. Sem data registrada
 // (premissa salva antes desse recurso existir) -> null, e aí não tem base pra avisar nada.
@@ -464,6 +503,7 @@ function tetosDoAtivo(a){
     cresc5: tetoCrescimentoHistorico(a.premissas.cresc5||{}),
     graham: tetoGraham(a.premissas.graham||{}),
     patrimonial: tetoPatrimonial(a.premissas.patrimonial||{}, a.classe, a.segmento),
+    ipca_fii: tetoIpcaFii(a.premissas.ipca_fii||{}),
   };
 }
 
@@ -522,7 +562,7 @@ function renderResumo(){
 
   const tb = document.getElementById('tbodyResumo');
   if(!enriquecidos.length){
-    tb.innerHTML = `<tr class="empty-row"><td colspan="12">Nenhum ativo encontrado.</td></tr>`;
+    tb.innerHTML = `<tr class="empty-row"><td colspan="13">Nenhum ativo encontrado.</td></tr>`;
     return;
   }
   tb.innerHTML = enriquecidos.map(a=>{
@@ -540,6 +580,7 @@ function renderResumo(){
       <td class="grp-cresc5">${t.cresc5==null?'—':BRL(t.cresc5)}</td>
       <td class="grp-graham">${t.graham==null?'—':BRL(t.graham)}</td>
       <td class="grp-patrimonial">${t.patrimonial==null?'—':BRL(t.patrimonial)}</td>
+      <td class="grp-ipca">${t.ipca_fii==null?'—':BRL(t.ipca_fii)}</td>
       <td class="resumo-teto melhor">${melhor==null?'—':BRL(melhor)}</td>
       <td class="${dist>=0?'pos':(dist<0?'neg':'')}">${PCT(dist)}</td>
       <td class="acoes-cell">
@@ -685,12 +726,28 @@ function renderEditor(){
       <div class="editor-field"><label>Fator ágio máx.<span class="ajuda" title="Múltiplo do VPA que você aceita pagar — 1,0 = nunca pagar acima do patrimônio">?</span></label>${inputPremissa(a.id,'patrimonial','fator_agio',d.fator_agio!=null?d.fator_agio:fp,dis)}
         <span class="hint">Múltiplo do VPA que você aceita pagar — padrão ${fpTxt}${isFIIDePapel(a.classe,a.segmento)?' (FII de papel: não vale a pena comprar já no teto patrimonial)':' (nunca acima do patrimônio)'}</span></div>`;
     },
+    ipca_fii: ()=>`
+      <div class="editor-field"><label>VPA<span class="ajuda" title="Valor Patrimonial por Cota atual">?</span></label>${inputPremissa(a.id,'ipca_fii','vpa',d.vpa,dis)}
+        <span class="hint">Valor patrimonial por cota atual</span></div>
+      <div class="editor-field"><label>Dividendo anual<span class="ajuda" title="Último dividendo mensal × 12 (ou a soma real dos últimos 12 meses)">?</span></label>${inputPremissa(a.id,'ipca_fii','dividendo_anual',d.dividendo_anual,dis)}
+        <span class="hint">Dividendo recorrente anualizado (último mensal × 12)</span></div>
+      <div class="editor-field"><label>Taxa real NTN-B<span class="ajuda" title="Taxa Compra do Tesouro IPCA+ de vencimento mais curto">?</span></label>${inputPremissa(a.id,'ipca_fii','taxa_real',d.taxa_real,dis)}
+        <span class="hint">Taxa real do Tesouro IPCA+ (NTN-B) de vencimento mais curto disponível</span></div>
+      <div class="editor-field"><label>IPCA 12m<span class="ajuda" title="Inflação REALIZADA nos últimos 12 meses (não projetada)">?</span></label>${inputPremissa(a.id,'ipca_fii','ipca_12m',d.ipca_12m,dis)}
+        <span class="hint">IPCA acumulado realizado nos últimos 12 meses</span></div>
+      <div class="editor-field"><label>Prazo (anos)<span class="ajuda" title="Anos até o vencimento da NTN-B usada como benchmark">?</span></label>${inputPremissa(a.id,'ipca_fii','anos',d.anos,dis)}
+        <span class="hint">Anos até o vencimento do título usado como benchmark</span></div>
+      <div class="editor-field"><label>Prêmio de risco<span class="ajuda" title="% exigido a mais sobre a NTN-B por ser um FII, não um título público">?</span></label>${inputPremissa(a.id,'ipca_fii','premio_risco',d.premio_risco!=null?d.premio_risco:1,dis)}
+        <span class="hint">Exigência extra sobre a NTN-B — padrão 1% (fundo âncora/baixo risco), 2% pra fundos mais arriscados</span></div>
+      <div class="editor-field"><label>IR no resgate<span class="ajuda" title="Alíquota de IR cobrada no resgate da NTN-B — usada só pra deixar a comparação justa com o dividendo isento do FII">?</span></label>${inputPremissa(a.id,'ipca_fii','ir_resgate',d.ir_resgate!=null?d.ir_resgate:15,dis)}
+        <span class="hint">IR sobre a NTN-B no vencimento — padrão 15% (acima de 720 dias)</span></div>`,
   };
 
   const funcTeto = {
     bazin: dd=>tetoBazin(dd, a.classe), barsi: dd=>tetoBarsi(dd, a.classe),
     fluxo_descontado: tetoFluxoDescontado, cresc5: tetoCrescimentoHistorico, graham: tetoGraham,
     patrimonial: dd=>tetoPatrimonial(dd, a.classe, a.segmento),
+    ipca_fii: tetoIpcaFii,
   }[METODO_EDITANDO];
   const teto = funcTeto(d);
   const dist = distancia(teto, a.preco);
@@ -713,6 +770,7 @@ function renderEditor(){
         ${velha?'⏱️ ':''}Premissas ${txt}${velha?' — considere revisar os números':''}</p>`;
     })()}
     ${METODO_EDITANDO==='fluxo_descontado' ? botaoBuscarMacro(a) : ''}
+    ${METODO_EDITANDO==='ipca_fii' ? botaoBuscarMacroIpca(a) : ''}
     <div class="editor-fields">${camposPorMetodo[METODO_EDITANDO]()}</div>
     <div class="editor-resultado">
       <div class="item"><div class="k">Teto (${info.nome})</div><div class="v">${teto==null?'—':BRL(teto)}</div></div>
@@ -744,6 +802,37 @@ async function buscarMacroFluxoDescontado(assetId){
     await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
     st.textContent = `✓ Tesouro IPCA+ ${d.juro_titulo_vencimento||''} (${d.juro_titulo_data||'—'}) · IPCA Focus (${d.ipca_data||'—'})`;
+    st.className = 'pos';
+    setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
+    renderResumo(); renderEditor();
+  } catch(e){
+    st.textContent = '⚠ erro de rede';
+    st.className = 'neg';
+  }
+}
+
+async function buscarMacroIpcaFii(assetId){
+  const st = document.getElementById('statusMacroIpca'+assetId);
+  st.textContent = 'buscando... (pode demorar até 30s)';
+  st.className = 'muted';
+  try{
+    const r = await fetch('/api/preco-teto/macro-fii');
+    const d = await r.json();
+    if(d.taxa_real==null && d.ipca_12m==null){
+      st.textContent = '⚠ ' + (d.erro || 'não consegui buscar');
+      st.className = 'neg';
+      return;
+    }
+    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+    if(!a) return;
+    const ipcaFii = {...(a.premissas.ipca_fii||{})};
+    if(d.taxa_real!=null) ipcaFii.taxa_real = d.taxa_real;
+    if(d.ipca_12m!=null) ipcaFii.ipca_12m = d.ipca_12m;
+    if(d.anos!=null) ipcaFii.anos = d.anos;
+    a.premissas.ipca_fii = ipcaFii;
+    await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({asset_id:assetId, metodo:'ipca_fii', dados:ipcaFii})});
+    st.textContent = `✓ NTN-B ${d.vencimento||''} (${d.vencimento_data||'—'}) · IPCA 12m (${d.ipca_12m_data||'—'})`;
     st.className = 'pos';
     setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
     renderResumo(); renderEditor();
@@ -803,6 +892,17 @@ async function buscarDadosParaAsset(a, onStatus){
       a.premissas.patrimonial = patrimonial;
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:a.id, metodo:'patrimonial', dados:patrimonial})});
+    }
+    // IPCA+ (FII) reaproveita o VPA (igual Patrimonial) e os dividendos de 12m (igual Bazin) —
+    // só a parte macro (taxa real da NTN-B + IPCA 12m) precisa do botão próprio, porque não
+    // vem do Investidor10
+    if(d.vpa || d.dividendos_12m){
+      const ipcaFii = {...(a.premissas.ipca_fii||{})};
+      if(d.vpa) ipcaFii.vpa = d.vpa;
+      if(d.dividendos_12m) ipcaFii.dividendo_anual = d.dividendos_12m;
+      a.premissas.ipca_fii = ipcaFii;
+      await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({asset_id:a.id, metodo:'ipca_fii', dados:ipcaFii})});
     }
     if(d.preco){
       await fetch('/api/assets/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},

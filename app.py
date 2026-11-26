@@ -466,6 +466,75 @@ def fetch_juro_titulo_longo() -> dict:
     return _cache_macro_get_ou_calcula("juro_titulo_longo", calcula)
 
 
+def fetch_juro_titulo_curto() -> dict:
+    """Taxa real (juro título) do Tesouro IPCA+ de vencimento mais PRÓXIMO (ainda não vencido)
+    disponível hoje — mesma fonte oficial do fetch_juro_titulo_longo, só que pegando o menor
+    vencimento futuro em vez do maior. É o benchmark usado no método de Preço Teto 'IPCA+
+    (FII)': a ideia (vídeo do Léo, Investidor Sardinha) é comparar o FII com o título público
+    mais curto possível, porque isso é o que "exige mais" do fundo — quanto mais curto o
+    título, maior a cobrança de retorno no curto prazo."""
+    def calcula():
+        try:
+            url = ("https://www.tesourotransparente.gov.br/ckan/dataset/"
+                   "df56aa42-484a-4a59-8184-7676580c81e3/resource/"
+                   "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv")
+            r = requests.get(url, headers=INVESTIDOR10_HEADERS, timeout=30)
+            r.raise_for_status()
+            reader = csv.reader(io.StringIO(r.content.decode("latin-1")), delimiter=";")
+            next(reader, None)  # cabeçalho
+            data_mais_recente, melhor = None, None
+            hoje = datetime.now()
+            for row in reader:
+                if len(row) < 5 or row[0].strip() != "Tesouro IPCA+":
+                    continue
+                try:
+                    d_base = datetime.strptime(row[2].strip(), "%d/%m/%Y")
+                    d_venc = datetime.strptime(row[1].strip(), "%d/%m/%Y")
+                except ValueError:
+                    continue
+                if d_venc <= hoje:
+                    continue  # só título que ainda não venceu
+                if data_mais_recente is None or d_base > data_mais_recente:
+                    data_mais_recente, melhor = d_base, None
+                if d_base == data_mais_recente and (melhor is None or d_venc < melhor[0]):
+                    # "Taxa Compra" é a rentabilidade bruta garantida levando o título até o
+                    # vencimento (índice 3) — "Taxa Venda" (índice 4) é só pra quem revende
+                    # antecipado ao Tesouro, não é a taxa que o comprador trava
+                    melhor = (d_venc, parse_num_br(row[3]))
+            if not melhor:
+                return {"juro_titulo": None, "vencimento": None, "data": None,
+                        "erro": "Tesouro IPCA+ não encontrado no arquivo"}
+            return {"juro_titulo": melhor[1], "vencimento": melhor[0].strftime("%Y"),
+                    "data": data_mais_recente.strftime("%Y-%m-%d"), "erro": None}
+        except Exception as e:  # noqa: BLE001
+            return {"juro_titulo": None, "vencimento": None, "data": None, "erro": str(e)}
+    return _cache_macro_get_ou_calcula("juro_titulo_curto", calcula)
+
+
+def fetch_ipca_12m_realizado() -> dict:
+    """IPCA acumulado nos últimos 12 meses (realizado, não projetado) — série 13522 do SGS,
+    Banco Central, API pública sem chave. Diferente do fetch_ipca_focus (que é a EXPECTATIVA
+    do mercado pros próximos 12 meses): esse aqui é o número que já aconteceu, usado no método
+    de Preço Teto 'IPCA+ (FII)' tanto pra converter a taxa real do título em nominal (fórmula
+    de Fisher) quanto pra projetar o crescimento do valor patrimonial do fundo."""
+    def calcula():
+        try:
+            url = ("https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1"
+                   "?formato=json")
+            r = requests.get(url, headers={"Accept": "application/json"}, timeout=15)
+            r.raise_for_status()
+            valores = r.json() or []
+            if not valores:
+                return {"ipca_12m": None, "data": None, "erro": "BCB não retornou dados"}
+            v = valores[-1]
+            # JSON do BCB já vem em ponto decimal americano ("4.63"), não no formato brasileiro
+            # que o parse_num_br espera — usar parse_num_br aqui trocaria "4.63" por 4,63 -> 463
+            return {"ipca_12m": float(v["valor"]), "data": v["data"], "erro": None}
+        except Exception as e:  # noqa: BLE001
+            return {"ipca_12m": None, "data": None, "erro": str(e)}
+    return _cache_macro_get_ou_calcula("ipca_12m_realizado", calcula)
+
+
 def fetch_investidor10(ticker: str) -> dict:
     """Extrai cotação e indicadores fundamentalistas do investidor10.com.br.
     Tenta primeiro como ação, depois como FII — os dois têm páginas com HTML
@@ -2833,7 +2902,7 @@ def api_darf_encargos():
 # Preço Teto (Bazin, Barsi, e outros métodos que vierem depois)
 # --------------------------------------------------------------------------- #
 
-METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5", "graham", "patrimonial"}
+METODOS_TETO = {"bazin", "barsi", "fluxo_descontado", "cresc5", "graham", "patrimonial", "ipca_fii"}
 
 
 @app.route("/numero-magico")
@@ -3201,6 +3270,25 @@ def api_fluxo_descontado_macro():
     })
 
 
+@app.route("/api/preco-teto/macro-fii")
+@login_required
+def api_preco_teto_macro_fii():
+    """Taxa real (NTN-B / Tesouro IPCA+ de vencimento mais curto) + IPCA realizado de 12 meses
+    pro método de Preço Teto 'IPCA+ (FII)'. 'anos' já vem calculado (vencimento do título menos
+    o ano atual) pra preencher a premissa de prazo direto, sem o usuário ter que fazer conta."""
+    juro = fetch_juro_titulo_curto()
+    ipca = fetch_ipca_12m_realizado()
+    anos = None
+    if juro["vencimento"]:
+        anos = max(1, int(juro["vencimento"]) - datetime.now().year)
+    return jsonify({
+        "taxa_real": juro["juro_titulo"], "vencimento": juro["vencimento"],
+        "vencimento_data": juro["data"], "anos": anos,
+        "ipca_12m": ipca["ipca_12m"], "ipca_12m_data": ipca["data"],
+        "erro": juro["erro"] or ipca["erro"],
+    })
+
+
 def ensure_schema():
     """Adiciona colunas novas em tabelas já existentes (SQLite e PostgreSQL).
 
@@ -3270,7 +3358,8 @@ with app.app_context():
 # arquivo do Tesouro Transparente é grande (~15MB) e demora uns 20s pra baixar; pré-aquecendo
 # o cache no boot, quem clicar em "buscar" na prática nunca sente essa espera (a não ser que
 # clique nos primeiros segundos de vida do processo, antes da thread terminar)
-threading.Thread(target=lambda: (fetch_ipca_focus(), fetch_juro_titulo_longo()),
+threading.Thread(target=lambda: (fetch_ipca_focus(), fetch_juro_titulo_longo(),
+                                  fetch_juro_titulo_curto(), fetch_ipca_12m_realizado()),
                   daemon=True).start()
 
 

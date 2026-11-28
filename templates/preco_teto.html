@@ -781,65 +781,63 @@ function renderEditor(){
 
 // ---------------------------------------------------------------- ações
 
-async function buscarMacroFluxoDescontado(assetId){
-  const st = document.getElementById('statusMacro'+assetId);
-  st.textContent = 'buscando... (pode demorar até 30s)';
-  st.className = 'muted';
+// Núcleo (sem tocar em status/DOM) de cada busca "macro" — reaproveitado tanto pelo botão
+// dedicado de cada método quanto pela busca única do Investidor10 (botaoBuscar / Calcular
+// tudo), pra um clique só já trazer tudo que o método precisa, sem precisar clicar duas vezes.
+async function aplicarMacroFluxoDescontado(a){
   try{
     const r = await fetch('/api/fluxo-descontado/macro');
     const d = await r.json();
-    if(d.juro_titulo==null && d.ipca_estimado==null){
-      st.textContent = '⚠ ' + (d.erro || 'não consegui buscar');
-      st.className = 'neg';
-      return;
-    }
-    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
-    if(!a) return;
+    if(d.juro_titulo==null && d.ipca_estimado==null) return {ok:false, msg:d.erro||'não consegui buscar'};
     const fluxo = {...(a.premissas.fluxo_descontado||{})};
     if(d.juro_titulo!=null) fluxo.juro_titulo = d.juro_titulo;
     if(d.ipca_estimado!=null) fluxo.ipca_estimado = d.ipca_estimado;
     a.premissas.fluxo_descontado = fluxo;
     await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({asset_id:assetId, metodo:'fluxo_descontado', dados:fluxo})});
-    st.textContent = `✓ Tesouro IPCA+ ${d.juro_titulo_vencimento||''} (${d.juro_titulo_data||'—'}) · IPCA Focus (${d.ipca_data||'—'})`;
-    st.className = 'pos';
-    setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
-    renderResumo(); renderEditor();
-  } catch(e){
-    st.textContent = '⚠ erro de rede';
-    st.className = 'neg';
-  }
+      body: JSON.stringify({asset_id:a.id, metodo:'fluxo_descontado', dados:fluxo})});
+    return {ok:true, msg:`✓ Tesouro IPCA+ ${d.juro_titulo_vencimento||''} (${d.juro_titulo_data||'—'}) · IPCA Focus (${d.ipca_data||'—'})`};
+  } catch(e){ return {ok:false, msg:'erro de rede'}; }
 }
-
-async function buscarMacroIpcaFii(assetId){
-  const st = document.getElementById('statusMacroIpca'+assetId);
-  st.textContent = 'buscando... (pode demorar até 30s)';
-  st.className = 'muted';
+async function aplicarMacroIpcaFii(a){
   try{
     const r = await fetch('/api/preco-teto/macro-fii');
     const d = await r.json();
-    if(d.taxa_real==null && d.ipca_12m==null){
-      st.textContent = '⚠ ' + (d.erro || 'não consegui buscar');
-      st.className = 'neg';
-      return;
-    }
-    const a = (DATA.ativos||[]).find(x=>x.id===assetId);
-    if(!a) return;
+    if(d.taxa_real==null && d.ipca_12m==null) return {ok:false, msg:d.erro||'não consegui buscar'};
     const ipcaFii = {...(a.premissas.ipca_fii||{})};
     if(d.taxa_real!=null) ipcaFii.taxa_real = d.taxa_real;
     if(d.ipca_12m!=null) ipcaFii.ipca_12m = d.ipca_12m;
     if(d.anos!=null) ipcaFii.anos = d.anos;
     a.premissas.ipca_fii = ipcaFii;
     await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({asset_id:assetId, metodo:'ipca_fii', dados:ipcaFii})});
-    st.textContent = `✓ NTN-B ${d.vencimento||''} (${d.vencimento_data||'—'}) · IPCA 12m (${d.ipca_12m_data||'—'})`;
-    st.className = 'pos';
-    setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
-    renderResumo(); renderEditor();
-  } catch(e){
-    st.textContent = '⚠ erro de rede';
-    st.className = 'neg';
-  }
+      body: JSON.stringify({asset_id:a.id, metodo:'ipca_fii', dados:ipcaFii})});
+    return {ok:true, msg:`✓ NTN-B ${d.vencimento||''} (${d.vencimento_data||'—'}) · IPCA 12m (${d.ipca_12m_data||'—'})`};
+  } catch(e){ return {ok:false, msg:'erro de rede'}; }
+}
+
+async function buscarMacroFluxoDescontado(assetId){
+  const st = document.getElementById('statusMacro'+assetId);
+  st.textContent = 'buscando... (pode demorar até 30s)';
+  st.className = 'muted';
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(!a) return;
+  const res = await aplicarMacroFluxoDescontado(a);
+  st.textContent = (res.ok?'':'⚠ ') + res.msg;
+  st.className = res.ok ? 'pos' : 'neg';
+  if(res.ok) setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
+  renderResumo(); renderEditor();
+}
+
+async function buscarMacroIpcaFii(assetId){
+  const st = document.getElementById('statusMacroIpca'+assetId);
+  st.textContent = 'buscando... (pode demorar até 30s)';
+  st.className = 'muted';
+  const a = (DATA.ativos||[]).find(x=>x.id===assetId);
+  if(!a) return;
+  const res = await aplicarMacroIpcaFii(a);
+  st.textContent = (res.ok?'':'⚠ ') + res.msg;
+  st.className = res.ok ? 'pos' : 'neg';
+  if(res.ok) setTimeout(()=>{ if(st.className==='pos') st.textContent=''; }, 8000);
+  renderResumo(); renderEditor();
 }
 
 // Núcleo da busca de dados no Investidor10 pra um único ativo: preenche as premissas de
@@ -893,9 +891,7 @@ async function buscarDadosParaAsset(a, onStatus){
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:a.id, metodo:'patrimonial', dados:patrimonial})});
     }
-    // IPCA+ (FII) reaproveita o VPA (igual Patrimonial) e os dividendos de 12m (igual Bazin) —
-    // só a parte macro (taxa real da NTN-B + IPCA 12m) precisa do botão próprio, porque não
-    // vem do Investidor10
+    // IPCA+ (FII) reaproveita o VPA (igual Patrimonial) e os dividendos de 12m (igual Bazin)
     if(d.vpa || d.dividendos_12m){
       const ipcaFii = {...(a.premissas.ipca_fii||{})};
       if(d.vpa) ipcaFii.vpa = d.vpa;
@@ -904,6 +900,13 @@ async function buscarDadosParaAsset(a, onStatus){
       await fetch('/api/preco-teto',{method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({asset_id:a.id, metodo:'ipca_fii', dados:ipcaFii})});
     }
+    // Juro título + IPCA (Fluxo Descontado) e NTN-B curta + IPCA (IPCA+ FII) são os únicos dados
+    // que não vêm do Investidor10 — ficam cacheados 12h no servidor, então buscar aqui de novo
+    // (em vez de obrigar um segundo clique no botão de cada método) não pesa na prática
+    status('buscando Juro título + IPCA...');
+    await aplicarMacroFluxoDescontado(a);
+    status('buscando NTN-B + IPCA...');
+    await aplicarMacroIpcaFii(a);
     if(d.preco){
       await fetch('/api/assets/'+a.id,{method:'PUT',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({preco:d.preco})});

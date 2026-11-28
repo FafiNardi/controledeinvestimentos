@@ -467,12 +467,21 @@ def fetch_juro_titulo_longo() -> dict:
 
 
 def fetch_juro_titulo_curto() -> dict:
-    """Taxa real (juro título) do Tesouro IPCA+ de vencimento mais PRÓXIMO (ainda não vencido)
-    disponível hoje — mesma fonte oficial do fetch_juro_titulo_longo, só que pegando o menor
-    vencimento futuro em vez do maior. É o benchmark usado no método de Preço Teto 'IPCA+
-    (FII)': a ideia (vídeo do Léo, Investidor Sardinha) é comparar o FII com o título público
-    mais curto possível, porque isso é o que "exige mais" do fundo — quanto mais curto o
-    título, maior a cobrança de retorno no curto prazo."""
+    """Taxa real (juro título) do Tesouro IPCA+ de vencimento mais PRÓXIMO que ainda está
+    REALMENTE em oferta pra compra nova — mesma fonte oficial do fetch_juro_titulo_longo, só
+    que pegando o menor vencimento em vez do maior. É o benchmark usado no método de Preço
+    Teto 'IPCA+ (FII)': a ideia (vídeo do Léo, Investidor Sardinha) é comparar o FII com o
+    título público mais curto possível, porque isso é o que "exige mais" do fundo.
+
+    O arquivo do Tesouro Transparente NÃO tem um campo "ainda ofertado pra compra?" — ele
+    continua publicando preço/taxa de títulos que já "rodaram" (saíram da lista de compra
+    nova e só servem mais pra resgate de quem já tem), então pegar literalmente o menor
+    vencimento do arquivo pega um título que na prática não dá mais pra comprar (foi o que
+    aconteceu com o IPCA+ 2029 em nov/2026, que sumiu da compra bem antes de vencer, com o
+    2032 virando o mais curto de verdade). Como o arquivo não diferencia isso, a aproximação
+    é um prazo mínimo até o vencimento (4 anos) — folga confortável acima do que o Tesouro
+    historicamente usa pra "rodar" o papel, sem chutar o ano exato (que muda com o tempo)."""
+    PRAZO_MINIMO_DIAS = 4 * 365  # ver explicação acima — aproximação, não regra oficial documentada
     def calcula():
         try:
             url = ("https://www.tesourotransparente.gov.br/ckan/dataset/"
@@ -484,6 +493,7 @@ def fetch_juro_titulo_curto() -> dict:
             next(reader, None)  # cabeçalho
             data_mais_recente, melhor = None, None
             hoje = datetime.now()
+            limite = hoje + timedelta(days=PRAZO_MINIMO_DIAS)
             for row in reader:
                 if len(row) < 5 or row[0].strip() != "Tesouro IPCA+":
                     continue
@@ -492,8 +502,8 @@ def fetch_juro_titulo_curto() -> dict:
                     d_venc = datetime.strptime(row[1].strip(), "%d/%m/%Y")
                 except ValueError:
                     continue
-                if d_venc <= hoje:
-                    continue  # só título que ainda não venceu
+                if d_venc < limite:
+                    continue  # provavelmente já saiu de oferta pra compra nova (só resgate)
                 if data_mais_recente is None or d_base > data_mais_recente:
                     data_mais_recente, melhor = d_base, None
                 if d_base == data_mais_recente and (melhor is None or d_venc < melhor[0]):
